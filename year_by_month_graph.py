@@ -9,7 +9,7 @@ regions_to_price = ['SA1', 'NSW1', 'QLD1', 'VIC1', 'TAS1']
 raw_data = 'E:/anvil_data/raw'
 filtered_data = 'E:/anvil_data/filtered'
 results = 'E:/anvil_data/results_2'
-for month in range(7, 10):
+for month in range(9, 10):
     start_time = '2017/{}/01 00:00:00'.format(str(month).zfill(2))  # inclusive
     if month != 12:
         end_time = '2017/{}/01 00:00:00'.format(str(month + 1).zfill(2))  # exclusive

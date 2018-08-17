@@ -1,5 +1,5 @@
 import input_generator
-import nemlite
+import engine
 import dashboards as db
 import pandas as pd
 import data_fetch_methods
@@ -12,9 +12,9 @@ regions_to_price = ['SA1', 'NSW1', 'QLD1', 'VIC1', 'TAS1']
 raw_data = 'E:/anvil_data/raw'
 filtered_data = 'E:/anvil_data/filtered_small_2'
 inputs = input_generator.actual_inputs_replicator(start_time, end_time, raw_data, filtered_data, True)
-nemlite_results, objective_data_frame = nemlite.run(inputs, start_time, end_time, cbc_path=ram_disk_path,
-                                                    regions_to_price=regions_to_price,
-                                                    save_to='E:/anvil_data/results_2')
+nemlite_results, objective_data_frame = engine.run(inputs, start_time, end_time, cbc_path=ram_disk_path,
+                                                   regions_to_price=regions_to_price,
+                                                   save_to='E:/anvil_data/results_2')
 nemlite_results.to_csv('E:/anvil_data/test.csv')
 #nemlite_results = pd.read_csv('C:/Users/user/anvil_data/test_new_FSO_min_energy.csv')
 actual_prices = data_fetch_methods.method_map['DISPATCHPRICE']\

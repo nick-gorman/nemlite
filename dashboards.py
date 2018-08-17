@@ -17,29 +17,23 @@ def plot_error(me, aemo):
                     right_on=['SETTLEMENTDATE', 'REGIONID'])
     comp['ERROR'] = comp['Price'] - comp['RRP']
     error = np.asarray(comp['ERROR'])
-    #sns.set(color_codes=True)
-    plt.hist(error, label='Error Frequency', bins=10000)
-    ci = st.t.interval(0.95, len(error) - 1, loc=np.mean(error), scale=st.sem(error))
+    plt.hist(error, bins=1000)
     mean_error = np.mean(abs(error))
     print(max(error))
     print(min(error))
     plt.axvline(np.percentile(error, 5), color='r', linestyle= '--', linewidth=0.5,
-                label='$5^{th}$ / $95^{th}$ Percentile' + '\n ({} / {}) {}'.format(round(np.percentile(error, 5),1),
-                                                                                   round(np.percentile(error, 95),1),
-                                                                                   round(mean_error,1)))
+                label='$5^{th}$ / $95^{th}$ Percentile')# + ' ({}, {}) \n  Mean Absolute Error{}'.
+                #format(round(np.percentile(error, 5),1), round(np.percentile(error, 95),1),
+                #round(mean_error,1)))
     plt.axvline(np.percentile(error, 95), color='r', linestyle= '--', linewidth=0.5)
     plt.legend()
-    #plt.xlim(-60, 100)
+
     plt.xlabel('Error \$ ($P_{estimate} - P_{actual}$)')
-    plt.ylabel('Normalised Frequency')
+    plt.ylabel('Frequency')
     plt.title('Nemlite Backcast \n Energy Price Error Distribution \n {} to {}'.
               format(me_service['DateTime'].min()[:10], me_service['DateTime'].max()[:10]),
               fontdict = {'fontsize': 10})
-    plt.xlim([-100, 100])
-
-    #error_and_flags = pd.merge(comp, flags, 'inner', 'DateTime')
-    #error = np.asarray(error_and_flags['ERROR'])
-    #sns.distplot(error, rug=False, kde=False, hist=True, ax=ax, rug_kws={"color": 'r'})
+    plt.xlim([-50, 50])
 
     return fig
 

@@ -10,7 +10,7 @@ from joblib import Parallel, delayed
 from shutil import copyfile
 
 
-def run(input_generator, start_time, end_time, cbc_path, save_to=None, regions_to_price=None, feed_back=False):
+def run(input_generator, cbc_path, save_to=None, regions_to_price=None, feed_back=False):
     # Create an object that holds the AEMO names for data table column names.
     ns = dn.declare_names()
 
