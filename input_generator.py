@@ -7,29 +7,36 @@ from joblib import Parallel, delayed
 import data_fetch_methods
 
 
-def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtered_data_folder, run_pre_filter=True):
+def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtered_data_folder, run_pre_filter=True,
+                             alternate_table_map=None):
 
     # Create a datetime generator for generator for each process that iterates over each 5 minutes interval in the
     # start to end time window.
     delta = timedelta(minutes=5)
     start_time_obj = datetime.strptime(start_time, '%Y/%m/%d %H:%M:%S')
     end_time_obj = datetime.strptime(end_time, '%Y/%m/%d %H:%M:%S')
-
     date_times_generator_2 = datetime_dispatch_sequence(start_time_obj, end_time_obj, delta)
+
+    if alternate_table_map is None:
+        tables = nemlite_defaults.parent_tables
+    else:
+        tables = []
+        for child_table_name, parent_tables_names in alternate_table_map.items():
+            tables += parent_tables_names
+
     if run_pre_filter:
         with Parallel(n_jobs=1) as pool:
             # Pre filter dispatch constraint first as some tables are filtered based of its filtered files.
-            run_pf('DISPATCHCONSTRAINT', start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
-            #Pre filter the rest of the tables.
-            pool(delayed(run_pf)(table, start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
-                 for table in nemlite_defaults.parent_tables if table != 'DISPATCHCONSTRAINT')
-
+            run_pf('BIDPEROFFER', start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
+            # Pre filter the rest of the tables.
+            #pool(delayed(run_pf)(table, start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
+            #      for table in tables if table != 'DISPATCHCONSTRAINT')
 
     for date_time in date_times_generator_2:
         datetime_name = date_time.replace('/', '')
         datetime_name = datetime_name.replace(" ", "_")
         datetime_name = datetime_name.replace(":", "")
-        input_tables = load_and_merge(datetime_name, filtered_data_folder)
+        input_tables = load_and_merge(datetime_name, filtered_data_folder, alternate_table_map)
 
         yield input_tables['generator_information'], input_tables['capacity_bids'], input_tables['initial_conditions'],\
             input_tables['interconnectors'], input_tables['demand'], input_tables['price_bids'], \
@@ -47,10 +54,16 @@ def run_pf(table, start_time, end_time, raw_aemo_data_folder, filtered_data_fold
     pre_filter(start_time, end_time, table, date_times_generator_1, raw_aemo_data_folder, filtered_data_folder)
 
 
-def load_and_merge(date_time_name, filtered_data):
+def load_and_merge(date_time_name, filtered_data, alternate_table_map):
+
+    if alternate_table_map is None:
+        table_map = nemlite_defaults.child_parent_map
+    else:
+        table_map = alternate_table_map
+
     save_location_formated = filtered_data + '/{}_{}.csv'
     child_tables = {}
-    for child_table_name, parent_tables_names in nemlite_defaults.child_parent_map.items():
+    for child_table_name, parent_tables_names in table_map.items():
         parent_tables = []
         for name in parent_tables_names:
             save_name_and_location = save_location_formated.format(name, date_time_name)
@@ -127,9 +140,21 @@ def interval_datetime_filter(data, save_location_formated, date_time, datetime_n
 def half_hour_peroids(data, save_location_formated, date_time, datetime_name, table_name):
     date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
     data['SETTLEMENTDATE'] = pd.to_datetime(data['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
-    data = data[(data['SETTLEMENTDATE'] >= date_time - timedelta(minutes=30) ) & (data['SETTLEMENTDATE'] < date_time)]
+    data = data[(data['SETTLEMENTDATE'] >= date_time) & (data['SETTLEMENTDATE'] < date_time + timedelta(minutes=30))]
     group_cols = defaults.effective_date_group_col[table_name]
     data = most_recent_version(data, table_name, group_cols)
+    return data
+
+
+def notice_time_for_half_hour_peroids(data, save_location_formated, date_time, datetime_name, table_name):
+    date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
+    date_time = date_time + (datetime.min - date_time) % timedelta(minutes=30)
+    data = data[data['SETTLEMENTDATE'] <= date_time]
+    data['OFFERDATE'] = pd.to_datetime(data['OFFERDATE'], format='%Y/%m/%d %H:%M:%S')
+    data['NOTICE_TIME'] = data['OFFERDATE'].apply(lambda offerdate: date_time - offerdate)
+    data = data[(data['NOTICE_TIME'] >= nemlite_defaults.minimum_notice)]
+    data = data.sort_values('NOTICE_TIME')
+    data = data.groupby(['DUID', 'SETTLEMENTDATE', 'BIDTYPE'], as_index=False).first()
     return data
 
 
@@ -140,6 +165,22 @@ def settlement_just_date_filter(data, save_location_formated, date_time, datetim
     date = datetime.strptime(date, '%Y/%m/%d %H:%M:%S')
     data['SETTLEMENTDATE'] = pd.to_datetime(data['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
     data = data[(data['SETTLEMENTDATE'] == date)]
+    return data
+
+
+def notice_time_settlement_just_date_filter(data, save_location_formated, date_time, datetime_name, table_name):
+    just_date = date_time[:10]
+    date_padding = ' 00:00:00'
+    date = just_date + date_padding
+    date = datetime.strptime(date, '%Y/%m/%d %H:%M:%S')
+    data['SETTLEMENTDATE'] = pd.to_datetime(data['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
+    data = data[(data['SETTLEMENTDATE'] == date)]
+    date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
+    data['OFFERDATE'] = pd.to_datetime(data['OFFERDATE'], format='%Y/%m/%d %H:%M:%S')
+    data['NOTICE_TIME'] = data['OFFERDATE'].apply(lambda offerdate: date_time - offerdate)
+    data = data[(data['NOTICE_TIME'] >= nemlite_defaults.minimum_notice)]
+    data = data.sort_values('NOTICE_TIME')
+    data = data.groupby(['DUID', 'SETTLEMENTDATE', 'BIDTYPE'], as_index=False).first()
     return data
 
 
@@ -231,6 +272,7 @@ filter_map = {'SPDCONNECTIONPOINTCONSTRAINT': constraint_filter,
               'GENCONDATA': constraint_filter,
               'SPDINTERCONNECTORCONSTRAINT': constraint_filter,
               'BIDPEROFFER_D': interval_datetime_filter,
+              'BIDPEROFFER': notice_time_for_half_hour_peroids,
               'DISPATCHINTERCONNECTORRES': settlement_date_filter,
               'INTERCONNECTOR': no_filter,
               'INTERCONNECTORCONSTRAINT': effective_date_and_version_filter,
@@ -240,6 +282,7 @@ filter_map = {'SPDCONNECTIONPOINTCONSTRAINT': constraint_filter,
               'DISPATCHCONSTRAINT': settlement_date_filter,
               'SPDREGIONCONSTRAINT': constraint_filter,
               'BIDDAYOFFER_D': settlement_just_date_filter,
+              'BIDDAYOFFER': notice_time_settlement_just_date_filter,
               'MNSP_DAYOFFER': settlement_just_date_and_version_filter,
               'MNSP_PEROFFER': half_hour_peroids,
               'DISPATCHLOAD': settlement_date_filter,

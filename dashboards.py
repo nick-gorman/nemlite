@@ -38,6 +38,23 @@ def plot_error(me, aemo):
     return fig
 
 
+def plot_error_v_price(me, aemo):
+    fig, ax = plt.subplots()
+    service = 'ENERGY'
+    me_service = me[(me['Service'] == service)]
+    aemo_service = aemo.loc[:, ('REGIONID', 'SETTLEMENTDATE', 'RRP')]
+    comp = pd.merge(me_service, aemo_service, 'inner', left_on=['DateTime', 'State'],
+                    right_on=['SETTLEMENTDATE', 'REGIONID'])
+    comp['ERROR'] = comp['Price'] - comp['RRP']
+    plt.plot(list(comp['RRP']), list(comp['ERROR']), 'ro', markersize=1)
+    plt.plot(np.unique(comp['RRP']), np.poly1d(np.polyfit(comp['RRP'], comp['ERROR'], 1))(np.unique(comp['RRP'])))
+    plt.title('Nemlite Error vs Price')
+    plt.ylabel('Error $/MWh')
+    ax.tick_params(labelsize=7)
+    plt.xlim([-200, 400])
+    plt.ylim([-200, 200])
+    return fig
+
 def plot_comp(me, aemo, region):
     fig, ax = plt.subplots(1, 1)
     me_service = me[(me['State'] == region) & (me['Service'] == 'ENERGY')]
@@ -85,6 +102,7 @@ def construct_pdf(me, aemo, save_as):
     #pp.savefig(plot_objective_error(objective_me, objective_aem))
     if not me.empty:
         pp.savefig(plot_error(me, aemo))
+        pp.savefig(plot_error_v_price(me, aemo))
         pp.savefig(plot_comp(me, aemo, 'NSW1'))
         pp.savefig(plot_comp(me, aemo, 'VIC1'))
         pp.savefig(plot_comp(me, aemo, 'QLD1'))

@@ -1,4 +1,5 @@
 import filters as fl
+from datetime import timedelta
 
 names = {'DISPATCHLOAD': 'PUBLIC_DVD_DISPATCHLOAD',
          'DUDETAILSUMMARY': 'PUBLIC_DVD_DUDETAILSUMMARY',
@@ -60,6 +61,7 @@ required_cols = {'SPDCONNECTIONPOINTCONSTRAINT': None,
                  'GENCONDATA': None,
                  'SPDINTERCONNECTORCONSTRAINT': None,
                  'BIDPEROFFER_D': None,
+                 'BIDPEROFFER': None,
                  'DISPATCHINTERCONNECTORRES': ('INTERCONNECTORID', 'DISPATCHINTERVAL'),
                  'INTERCONNECTOR': ('INTERCONNECTORID', 'REGIONFROM', 'REGIONTO'),
                  'INTERCONNECTORCONSTRAINT': ('INTERCONNECTORID', 'MAXMWIN', 'MAXMWOUT', 'LOSSCONSTANT',
@@ -72,6 +74,7 @@ required_cols = {'SPDCONNECTIONPOINTCONSTRAINT': None,
                  'DISPATCHCONSTRAINT': ('GENCONID', 'RHS', 'VERSIONNO', 'EFFECTIVEDATE'),
                  'SPDREGIONCONSTRAINT': None,
                  'BIDDAYOFFER_D': None,
+                 'BIDDAYOFFER': None,
                  'MNSP_DAYOFFER': ('LINKID', 'PRICEBAND1', 'PRICEBAND2', 'PRICEBAND3', 'PRICEBAND4', 'PRICEBAND5',
                                    'PRICEBAND6', 'PRICEBAND7', 'PRICEBAND8', 'PRICEBAND9', 'PRICEBAND10'),
                  'MNSP_PEROFFER': ('LINKID', 'BANDAVAIL1', 'BANDAVAIL2', 'BANDAVAIL3', 'BANDAVAIL4', 'BANDAVAIL5',
@@ -86,6 +89,7 @@ wrapper_map = {'SPDCONNECTIONPOINTCONSTRAINT': None,
                'GENCONDATA': None,
                'SPDINTERCONNECTORCONSTRAINT': None,
                'BIDPEROFFER_D': fl.filter_on_interval_datetime,
+               'BIDPEROFFER': fl.make_and_filter_on_settlementdate,
                'DISPATCHINTERCONNECTORRES': fl.filter_on_settlementdate,
                'INTERCONNECTOR': fl.filter_on_last_changed,
                'INTERCONNECTORCONSTRAINT': fl.filter_on_effective_date,
@@ -95,6 +99,7 @@ wrapper_map = {'SPDCONNECTIONPOINTCONSTRAINT': None,
                'DISPATCHCONSTRAINT': fl.filter_on_settlementdate,
                'SPDREGIONCONSTRAINT': None,
                'BIDDAYOFFER_D': fl.filter_on_settlementdate,
+               'BIDDAYOFFER': fl.filter_on_settlementdate,
                'MNSP_DAYOFFER': fl.filter_on_settlementdate,
                'MNSP_PEROFFER': fl.filter_on_date_and_peroid,
                'DISPATCHLOAD': fl.filter_on_settlementdate,
@@ -103,3 +108,5 @@ wrapper_map = {'SPDCONNECTIONPOINTCONSTRAINT': None,
                'DISPATCHREGIONSUM': fl.filter_on_settlementdate}
 
 aemo_data_suffix = 'PUBLIC_DVD_'
+
+minimum_notice = timedelta(hours=0.0)

@@ -1,19 +1,36 @@
 import input_generator
 import engine
 
+child_parent_map = {'connection_point_constraints': ['SPDCONNECTIONPOINTCONSTRAINT'],
+                    'constraint_data': ['GENCONDATA', 'DISPATCHCONSTRAINT'],
+                    'interconnector_constraints': ['SPDINTERCONNECTORCONSTRAINT'],
+                    'capacity_bids': ['BIDPEROFFER'], # Dispatch load should get merged here.
+                    'interconnectors': ['INTERCONNECTOR', 'INTERCONNECTORCONSTRAINT'],
+                    'market_interconnectors': ['MNSP_INTERCONNECTOR'],
+                    'generator_information': ['DUDETAILSUMMARY'],
+                    'region_constraints': ['SPDREGIONCONSTRAINT'],
+                    'price_bids': ['BIDDAYOFFER'],
+                    'market_interconnector_price_bids': ['MNSP_DAYOFFER'],
+                    'market_interconnector_capacity_bids': ['MNSP_PEROFFER'],
+                    'initial_conditions': ['DISPATCHLOAD'],
+                    'interconnector_segments': ['LOSSMODEL', 'DISPATCHINTERCONNECTORRES'],
+                    'interconnector_dynamic_loss_coefficients': ['LOSSFACTORMODEL'],
+                    'demand': ['DISPATCHREGIONSUM']}
+
 year = 2017
 cbc_path = 'C:/Users/user/PycharmProjects/anvil/venv/Lib/site-packages/pulp/solverdir/cbc/win/64'
 regions_to_price = ['SA1', 'NSW1', 'QLD1', 'VIC1', 'TAS1']
 raw_data = 'E:/anvil_data/raw'
 filtered_data = 'E:/anvil_data/filtered'
 results = 'E:/anvil_data/results_2'
-for month in range(12, 13):
+for month in range(1, 2):
     start_time = '2017/{}/01 00:00:00'.format(str(month).zfill(2))  # inclusive
     if month != 12:
         end_time = '2017/{}/01 00:00:00'.format(str(month + 1).zfill(2))  # exclusive
     else:
         end_time = '2018/01/01 00:00:00'
-    inputs = input_generator.actual_inputs_replicator(start_time, end_time, raw_data, filtered_data, False)
+    inputs = input_generator.actual_inputs_replicator(start_time, end_time, raw_data, filtered_data, True,
+                                                      alternate_table_map=child_parent_map)
     nemlite_results, objective_data_frame = engine.run(inputs, cbc_path, regions_to_price=regions_to_price,
                                                        save_to=results, feed_back=False)
     nemlite_results.to_csv('E:/anvil_data/no_fs_checks_results_2_{}_{}.csv'.format(year, str(month).zfill(2)))
