@@ -5,6 +5,7 @@ import query_wrapers
 from datetime import datetime, timedelta
 from joblib import Parallel, delayed
 import data_fetch_methods
+import numpy as np
 
 
 def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtered_data_folder, run_pre_filter=True,
@@ -27,10 +28,10 @@ def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtere
     if run_pre_filter:
         with Parallel(n_jobs=1) as pool:
             # Pre filter dispatch constraint first as some tables are filtered based of its filtered files.
-            run_pf('BIDPEROFFER', start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
+            run_pf('DISPATCHCONSTRAINT', start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
             # Pre filter the rest of the tables.
-            #pool(delayed(run_pf)(table, start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
-            #      for table in tables if table != 'DISPATCHCONSTRAINT')
+            pool(delayed(run_pf)(table, start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
+                  for table in tables if table != 'DISPATCHCONSTRAINT')
 
     for date_time in date_times_generator_2:
         datetime_name = date_time.replace('/', '')
@@ -87,6 +88,10 @@ def pre_filter(start_time, end_time, table, date_time_sequence, raw_data_locatio
         filter_cols = None
         filter_values = None
 
+    if table == 'DISPATCHLOAD':
+        start_time = datetime.strptime(start_time, '%Y/%m/%d %H:%M:%S') - timedelta(minutes=65)
+        start_time = start_time.isoformat().replace('T', ' ').replace('-', '/')
+
     all_data = data_fetch_methods.method_map[table](start_time, end_time, table, raw_data_location,
                                                     filter_cols=filter_cols, filter_values=filter_values)
 
@@ -123,6 +128,31 @@ def settlement_date_filter(data, save_location_formated, date_time, datetime_nam
         data = data.loc[:, ('CONSTRAINTID', 'RHS', 'GENCONID_VERSIONNO', 'GENCONID_EFFECTIVEDATE')]
         data.columns = ['GENCONID', 'RHS', 'VERSIONNO', 'EFFECTIVEDATE']
 
+    return data
+
+
+def fast_start_time_on(data, save_location_formated, date_time, datetime_name, table_name):
+    data_time_on = data.copy()
+    date_time_time_on = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
+    data_time_on['SETTLEMENTDATE'] = pd.to_datetime(data_time_on['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
+    data_time_on['DISPATCHMODE'] = pd.to_numeric(data_time_on['DISPATCHMODE'])
+    previous_interval_dispatch_mode = data_time_on.loc[:, ('SETTLEMENTDATE', 'DISPATCHMODE', 'DUID')].copy()
+    interval_length = timedelta(minutes=5)
+    previous_interval_dispatch_mode['SETTLEMENTDATE'] = \
+        previous_interval_dispatch_mode['SETTLEMENTDATE'].apply(lambda SD: SD + interval_length)
+    previous_interval_dispatch_mode.columns = ['SETTLEMENTDATE', 'PREVIOUSDISPATCHMODE', 'DUID']
+    data_time_on = pd.merge(data_time_on, previous_interval_dispatch_mode, 'inner', ['SETTLEMENTDATE', 'DUID'])
+    data_time_on['DISPATCHMODECHANGE'] = data_time_on['DISPATCHMODE'] - data_time_on['PREVIOUSDISPATCHMODE']
+    data_time_on = data_time_on[data_time_on['SETTLEMENTDATE'] < date_time_time_on]
+    data_time_on = data_time_on[(data_time_on['DISPATCHMODECHANGE'] < 0) | (data_time_on['DISPATCHMODE'] == 0)]
+    data_time_on = data_time_on.sort_values('SETTLEMENTDATE')
+    data_time_on = data_time_on.groupby('DUID', as_index=False).last()
+    data_time_on['SETTLEMENTDATE'] = np.where(data_time_on['DISPATCHMODE'] == 0, data_time_on['SETTLEMENTDATE'],
+                                              data_time_on['SETTLEMENTDATE'] - interval_length)
+    data_time_on = data_time_on.loc[:, ('DUID', 'SETTLEMENTDATE')]
+    data_time_on.columns = ['DUID', 'ACTIVATIONTIME']
+    data = settlement_date_filter(data, save_location_formated, date_time, datetime_name, table_name)
+    data = pd.merge(data, data_time_on, 'inner', 'DUID')
     return data
 
 
@@ -285,7 +315,7 @@ filter_map = {'SPDCONNECTIONPOINTCONSTRAINT': constraint_filter,
               'BIDDAYOFFER': notice_time_settlement_just_date_filter,
               'MNSP_DAYOFFER': settlement_just_date_and_version_filter,
               'MNSP_PEROFFER': half_hour_peroids,
-              'DISPATCHLOAD': settlement_date_filter,
+              'DISPATCHLOAD': fast_start_time_on,
               'LOSSMODEL': effective_date_and_version_filter_for_inter_seg,
               'LOSSFACTORMODEL': effective_date_and_version_filter,
               'DISPATCHREGIONSUM': settlement_date_filter}

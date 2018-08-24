@@ -21,13 +21,13 @@ child_parent_map = {'connection_point_constraints': ['SPDCONNECTIONPOINTCONSTRAI
                     'demand': ['DISPATCHREGIONSUM']}
 
 # The time window variables, these define the times for which the program will run the dispatch algo.
-start_time = '2017/04/01 12:05:00'  # inclusive
-end_time = '2017/04/01 12:10:00'  # exclusive
+start_time = '2017/09/01 04:25:00'  # inclusive
+end_time = '2017/09/01 04:30:00'  # exclusive
 ram_disk_path = 'C:/Users/user/PycharmProjects/anvil/venv/Lib/site-packages/pulp/solverdir/cbc/win/64'
 regions_to_price = ['SA1', 'NSW1', 'QLD1', 'VIC1', 'TAS1']
 raw_data = 'E:/anvil_data/raw'
-filtered_data = 'E:/anvil_data/filter_comp_bids'
-inputs = input_generator.actual_inputs_replicator(start_time, end_time, raw_data, filtered_data, True,
+filtered_data = 'E:/anvil_data/filtered'
+inputs = input_generator.actual_inputs_replicator(start_time, end_time, raw_data, filtered_data, False,
                                                   alternate_table_map=None)
 nemlite_results, objective_data_frame = engine.run(inputs, cbc_path=ram_disk_path,
                                                    regions_to_price=regions_to_price,

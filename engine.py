@@ -8,6 +8,7 @@ import os
 import subprocess
 from joblib import Parallel, delayed
 from shutil import copyfile
+from datetime import datetime, timedelta
 
 
 def run(input_generator, cbc_path, save_to=None, regions_to_price=None, feed_back=False):
@@ -215,14 +216,14 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
                                      ns.col_dispatch_type, 'CONNECTIONPOINTID')]
 
     # Create a list of the plants operating in fast start mode.
-    # fast_start_du = define_fast_start_plants(price_bids_raw.copy())
+    fast_start_du = define_fast_start_plants(price_bids_raw.copy())
 
     capacity_bids_raw = apply_fcas_enablement_criteria(capacity_bids_raw.copy(), unit_solution_raw.copy())
 
     # Create a dataframe of the constraints that define generator capacity bids in the energy and FCAS markets. A
     # dataframe that defines each variable used to represent the the bids in the linear program is also returned.
-    bidding_constraints, bid_variable_data = create_bidding_contribution_to_constraint_matrix(capacity_bids_raw.copy(),
-                                                                                              unit_solution_raw, ns)
+    bidding_constraints, bid_variable_data = \
+        create_bidding_contribution_to_constraint_matrix(capacity_bids_raw.copy(), unit_solution_raw, ns, fast_start_du)
 
     # Find the current maximum index of the system variable, so new variable can be assigned correct unique indexes.
     max_var_index = max_variable_index(bidding_constraints)
@@ -340,6 +341,10 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
 
     # Convert the object function coefficients to a tuple format.
     objective_coefficients = create_objective_coefficients_tuple(objective_coefficients, number_of_variables, ns)
+
+    #
+    req_row_indexes_coefficients_for_inter = pd.concat([req_row_indexes_coefficients_for_inter,
+            inter_seg_dispatch_order_constraints[inter_seg_dispatch_order_constraints['CAPACITYBAND']!='INTERVAR'].groupby('INDEX', as_index=False).first()])
 
     print('dataframes first half {}'.format(time() - t2))
     return constraint_matrix, rhs_coefficients, objective_coefficients, number_of_variables, number_of_constraints, \
@@ -525,20 +530,24 @@ def create_generic_constraints(connection_point_constraints, inter_constraints, 
     return combined_constraints, type_and_rhs
 
 
-def create_bidding_contribution_to_constraint_matrix(capacity_bids, unit_solution, ns):
+def create_bidding_contribution_to_constraint_matrix(capacity_bids, unit_solution, ns, fast_start_gens):
     original = capacity_bids.copy()
     # Fast start plants must conform to their dispatch profiles, therefore their maximum available energy are overridden
     # to match the dispatch profiles.
-    # capacity_bids = over_ride_max_energy_for_fast_start_plants(capacity_bids.copy(), unit_solution, fast_start_gens)
+    capacity_bids = over_ride_max_energy_for_fast_start_plants(capacity_bids.copy(), unit_solution, fast_start_gens)
 
     # Add an additional column that defines the maximum output of a plant, considering its, max avail bid, its stated
     # availability in the previous intervals unit solution and its a ramp rates.
     capacity_bids = add_max_unit_energy(capacity_bids, unit_solution, ns)
     capacity_bids = add_min_unit_energy(capacity_bids, unit_solution, ns)
 
+    capacity_bids = over_ride_min_energy_for_fast_start_plants(capacity_bids.copy())
+
     # If the maximum energy of a plant is below its minimum energy then reset the minimum energy to equal that maximum.
     # Note this means the plants is being constrained up by is minimum energy level.
     capacity_bids = rationalise_max_energy_constraint(capacity_bids)
+
+
 
     # Any units where their maximum available energy is zero have all their bids removed.
     bids_with_zero_avail_removed = remove_energy_bids_with_max_energy_zero(capacity_bids.copy())
@@ -559,6 +568,8 @@ def create_bidding_contribution_to_constraint_matrix(capacity_bids, unit_solutio
     max_con_index = max_constraint_index(bids_and_data)
     unit_min_energy_constraints = create_min_unit_energy_constraints(bids_and_indexes.copy(), capacity_bids.copy(),
                                                                      max_con_index, ns)
+
+
     bids_and_data = pd.concat([bids_and_data, unit_min_energy_constraints], sort=False)  # type: pd.DataFrame
 
     bids_and_data = pd.merge(bids_and_data,
@@ -720,9 +731,16 @@ class EnergyMarketLp:
                 variables[int(index)].cat = 'Integer'
 
         # Set the properties of the market variables associated with the interconnectors.
-        for index, upper_bound in zip(list(self.inter_bounds[self.names.col_variable_index]),
-                                      list(self.inter_bounds[self.names.col_upper_bound])):
-            variables[int(index)].bounds(0, upper_bound)
+        for index, upper_bound, band_type in zip(list(self.inter_bounds[self.names.col_variable_index]),
+                                      list(self.inter_bounds[self.names.col_upper_bound]),
+                                      list(self.inter_bounds[self.names.col_capacity_band_number])):
+
+            if (band_type == 'INTERTRIGGERVAR'):
+                variables[int(index)].bounds(0, 1)
+                variables[int(index)].cat = 'Integer'
+            else:
+                variables[int(index)].bounds(0, upper_bound)
+
 
         # Add the variables to the linear problem.
         prob.addVariables(list(variables.values()))
@@ -954,7 +972,7 @@ def create_pos_max_trigger_cons(pos_flow_vars_not_last, row_offset, var_offset):
     # or one. In these constraints when the value is zero, the upper segment must have a zero value, but when the
     # trigger variable has a value of 1, then the upper segment can have postive value. Then the trigger variable is
     # re used in the min trigger constraints such that it can only have a value of 1 when the lower segment is at full
-    # capacity. Tis force the segments tp be dispatched in the correct order.
+    # capacity. This forces the segments to be dispatched in the correct order.
 
     # Create the trigger variable coefficients with indexes.
     integer_var_coefficients = pos_flow_vars_not_last.copy()
@@ -1350,16 +1368,81 @@ def create_max_unit_energy_constraints(bidding_indexes, raw_data, max_row_index,
     return indexes_and_constraints_rows
 
 
+def over_ride_min_energy_for_fast_start_plants(original_min_energy_constraints):
+    min_energy_constraints = original_min_energy_constraints
+    min_energy_constraints['MINENERGY'] = \
+        np.vectorize(fast_start_min_available)(min_energy_constraints['T1'], min_energy_constraints['T2'],
+                                               min_energy_constraints['T3'], min_energy_constraints['T4'],
+                                               min_energy_constraints['MINIMUMLOAD'],
+                                               min_energy_constraints['SETTLEMENTDATE'],
+                                               min_energy_constraints['ACTIVATIONTIME'],
+                                               min_energy_constraints['DISPATCHMODE'],
+                                               min_energy_constraints['MINENERGY'],
+                                               min_energy_constraints['ISFAST'])
+    return min_energy_constraints
+
+
+def fast_start_min_available(t1, t2, t3, t4, min_load, settlementdate, activation_time, mode, min_avail, is_fast):
+    settlementdate = datetime.strptime(settlementdate, '%Y/%m/%d %H:%M:%S')
+    activation_time = datetime.strptime(activation_time, '%Y/%m/%d %H:%M:%S')
+    T = settlementdate - activation_time
+    y = inflex_profile_function(timedelta(minutes=t1), timedelta(minutes=t2), timedelta(minutes=t3),
+                                timedelta(minutes=t4), min_load, T)
+    if is_fast == 1 and mode in [3, 4] and min_avail < y:
+        new_min = y
+    else:
+        new_min = min_avail
+    return  new_min
+
+
 def over_ride_max_energy_for_fast_start_plants(original_max_energy_constraints, unit_solutions, fast_start_defs):
     # Merge in the unit solution which provides fast start mode info.
     max_energy_constraints = \
-        pd.merge(original_max_energy_constraints, unit_solutions.loc[:, ('DUID', 'DISPATCHMODE')], 'left', 'DUID')
+        pd.merge(original_max_energy_constraints,
+                 unit_solutions.loc[:, ('DUID', 'DISPATCHMODE', 'ACTIVATIONTIME')], 'left', 'DUID')
     # Merge in fast start definitions which defines which plants are fast start plants.
     max_energy_constraints = pd.merge(max_energy_constraints, fast_start_defs, 'left', 'DUID')
+
     # If a fast start plant is operating in mode 1 then set its max energy to 0, else leave as is.
-    max_energy_constraints['MAXAVAIL'] = np.where(max_energy_constraints['DISPATCHMODE'] == 1, 0,
-                                                  max_energy_constraints['MAXAVAIL'])
+    max_energy_constraints['MAXAVAIL'] = \
+        np.vectorize(fast_start_max_available)(max_energy_constraints['T1'], max_energy_constraints['T2'],
+                                               max_energy_constraints['T3'], max_energy_constraints['T4'],
+                                               max_energy_constraints['MINIMUMLOAD'],
+                                               max_energy_constraints['SETTLEMENTDATE'],
+                                               max_energy_constraints['ACTIVATIONTIME'],
+                                               max_energy_constraints['DISPATCHMODE'],
+                                               max_energy_constraints['MAXAVAIL'],
+                                               max_energy_constraints['ISFAST'])
+
     return max_energy_constraints
+
+
+def fast_start_max_available(t1, t2, t3, t4, min_load, settlementdate, activation_time, mode, max_avail, is_fast):
+    settlementdate = datetime.strptime(settlementdate, '%Y/%m/%d %H:%M:%S')
+    activation_time = datetime.strptime(activation_time, '%Y/%m/%d %H:%M:%S')
+    T = settlementdate - activation_time
+    y = inflex_profile_function(timedelta(minutes=t1), timedelta(minutes=t2), timedelta(minutes=t3),
+                                timedelta(minutes=t4), min_load, T)
+    if is_fast == 1 and mode in [0, 1, 2] and max_avail > y:
+        new_max = y
+    else:
+        new_max = max_avail
+    return  new_max
+
+
+def inflex_profile_function(t1, t2, t3, t4, min_Load, T):
+    if T <= t1:
+        y = 0
+    elif T <= t1 + t2:
+        y = ((T - t1) / t2) * min_Load
+    elif T <= t1 + t2 + t3:
+        y = min_Load
+    elif T <= t1 + t2 + t3 + t4:
+        y = min_Load - ((T - t1 - t2 -t3) / t4) * min_Load
+    else:
+        y = 0
+    return y
+
 
 
 def create_min_unit_energy_constraints(bidding_indexes, raw_data, max_row_index, ns):
@@ -1786,7 +1869,7 @@ def define_fast_start_plants(bid_costs):
                                    (bid_costs['T4'] > 0), 1, 0)
     # bid_costs = bid_costs[bid_costs['BIDTYPE'] == 'ENERGY']
     bid_costs = bid_costs.groupby(['DUID'], as_index=False).first()
-    return bid_costs.loc[:, ('DUID', 'ISFAST', 'MINIMUMLOAD', 'T1', 'T2')]
+    return bid_costs.loc[:, ('DUID', 'ISFAST', 'MINIMUMLOAD', 'T1', 'T2', 'T3', 'T4')]
 
 
 def find_price(base_dispatch, increased_dispatch, gen_info_raw):

@@ -46,13 +46,14 @@ def plot_error_v_price(me, aemo):
     comp = pd.merge(me_service, aemo_service, 'inner', left_on=['DateTime', 'State'],
                     right_on=['SETTLEMENTDATE', 'REGIONID'])
     comp['ERROR'] = comp['Price'] - comp['RRP']
+   # comp = comp[comp['RRP'] > -100]
     plt.plot(list(comp['RRP']), list(comp['ERROR']), 'ro', markersize=1)
     plt.plot(np.unique(comp['RRP']), np.poly1d(np.polyfit(comp['RRP'], comp['ERROR'], 1))(np.unique(comp['RRP'])))
     plt.title('Nemlite Error vs Price')
     plt.ylabel('Error $/MWh')
     ax.tick_params(labelsize=7)
-    plt.xlim([-200, 400])
-    plt.ylim([-200, 200])
+    plt.xlim([50, 150])
+    plt.ylim([-20, 40])
     return fig
 
 def plot_comp(me, aemo, region):
@@ -64,7 +65,7 @@ def plot_comp(me, aemo, region):
     plt.plot(dates, list(me_service['Price']), 'b.', label='Nemlite', markersize=1)
     plt.title('Nemlite Backcast \n  {} {}'.format(region, 'Energy'))
     plt.ylabel('Price ($ {\$}/{MWh} $)')
-    plt.yscale('log')
+    #plt.yscale('log')
     plt.legend()
     ax.xaxis.set_major_locator(mdates.DayLocator(interval=7))
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y/%m/%d'))
