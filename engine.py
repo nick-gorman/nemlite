@@ -11,7 +11,7 @@ from shutil import copyfile
 from datetime import datetime, timedelta
 
 
-def run(input_generator, cbc_path, save_to=None, regions_to_price=None, feed_back=False):
+def run(input_generator, cbc_path, save_to=None, regions_to_price=None, feed_back=False, fast_start=True):
     # Create an object that holds the AEMO names for data table column names.
     ns = dn.declare_names()
 
@@ -45,7 +45,7 @@ def run(input_generator, cbc_path, save_to=None, regions_to_price=None, feed_bac
                                  region_req_raw, price_bids_raw, inter_seg_definitions,
                                  con_point_constraints, inter_gen_constraints, gen_con_data,
                                  region_constraints, inter_demand_coefficients, mnsp_inter, mnsp_price_bids,
-                                 mnsp_capacity_bids, ns)
+                                 mnsp_capacity_bids, ns, fast_start)
 
             # Solve a number of variations of the base problem. These are the problem with the actual loads for each region
             # and an extra solve for each region where a marginal load of 1 MW is added. The dispatches of each
@@ -170,7 +170,7 @@ def run_par(region):
 def create_problem(gen_info_raw: pd, capacity_bids_raw: pd, unit_solution_raw: pd, inter_direct_raw: pd,
                    region_req_raw: pd, price_bids_raw: pd, inter_seg_definitions: pd,
                    con_point_constraints, inter_gen_constraints, gen_con_data, region_constraints,
-                   inter_demand_coefficients, mnsp_inter, mnsp_price_bids, mnsp_capacity_bids, ns):
+                   inter_demand_coefficients, mnsp_inter, mnsp_price_bids, mnsp_capacity_bids, ns, fast_start):
     # Create a linear problem that defines the national electricity market for a given 5 minute dispatch interval.
     # This requires a series of data tables in the form of pandas dataframes. Each dataframe defines an aspect of the
     # market for a given interval, for a full description of each dataframe see supporting documentation.
@@ -184,7 +184,7 @@ def create_problem(gen_info_raw: pd, capacity_bids_raw: pd, unit_solution_raw: p
                                 region_req_raw, price_bids_raw, inter_seg_definitions,
                                 ns, con_point_constraints, inter_gen_constraints, gen_con_data,
                                 region_constraints, inter_demand_coefficients, mnsp_inter, mnsp_price_bids,
-                                mnsp_capacity_bids)
+                                mnsp_capacity_bids, fast_start)
     print('Create dataframes {}'.format(time() - t3))
 
     t4 = time()
@@ -205,7 +205,7 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
                             region_req_raw, price_bids_raw, inter_seg_definitions,
                             ns, con_point_constraints, inter_gen_constraints, gen_con_data,
                             region_constraints, inter_demand_coefficients, mnsp_inter, mnsp_price_bids,
-                            mnsp_capacity_bids):
+                            mnsp_capacity_bids, fast_start):
     t1 = time()
     # Convert data formatted in the style and layout of AEMO public data files to the format of a linear program, i.e
     # return a constraint matrix, objective function, also return additional information needed to create a pulp lp
@@ -223,7 +223,8 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
     # Create a dataframe of the constraints that define generator capacity bids in the energy and FCAS markets. A
     # dataframe that defines each variable used to represent the the bids in the linear program is also returned.
     bidding_constraints, bid_variable_data = \
-        create_bidding_contribution_to_constraint_matrix(capacity_bids_raw.copy(), unit_solution_raw, ns, fast_start_du)
+        create_bidding_contribution_to_constraint_matrix(capacity_bids_raw.copy(), unit_solution_raw, ns, fast_start_du,
+                                                         fast_start)
 
     # Find the current maximum index of the system variable, so new variable can be assigned correct unique indexes.
     max_var_index = max_variable_index(bidding_constraints)
@@ -530,18 +531,19 @@ def create_generic_constraints(connection_point_constraints, inter_constraints, 
     return combined_constraints, type_and_rhs
 
 
-def create_bidding_contribution_to_constraint_matrix(capacity_bids, unit_solution, ns, fast_start_gens):
+def create_bidding_contribution_to_constraint_matrix(capacity_bids, unit_solution, ns, fast_start_gens, fast_start):
     original = capacity_bids.copy()
     # Fast start plants must conform to their dispatch profiles, therefore their maximum available energy are overridden
     # to match the dispatch profiles.
-    capacity_bids = over_ride_max_energy_for_fast_start_plants(capacity_bids.copy(), unit_solution, fast_start_gens)
+    if fast_start:
+        capacity_bids = over_ride_max_energy_for_fast_start_plants(capacity_bids.copy(), unit_solution, fast_start_gens)
 
     # Add an additional column that defines the maximum output of a plant, considering its, max avail bid, its stated
     # availability in the previous intervals unit solution and its a ramp rates.
     capacity_bids = add_max_unit_energy(capacity_bids, unit_solution, ns)
     capacity_bids = add_min_unit_energy(capacity_bids, unit_solution, ns)
-
-    capacity_bids = over_ride_min_energy_for_fast_start_plants(capacity_bids.copy())
+    if fast_start:
+        capacity_bids = over_ride_min_energy_for_fast_start_plants(capacity_bids.copy())
 
     # If the maximum energy of a plant is below its minimum energy then reset the minimum energy to equal that maximum.
     # Note this means the plants is being constrained up by is minimum energy level.
@@ -899,9 +901,36 @@ def create_inter_seg_dispatch_order_constraints(inter_var_indexes, row_offset, v
     neg_flow_vars = energy_only_indexes[energy_only_indexes['MWBREAKPOINT'] < 0]
     pos_flow_constraints, max_row, max_var = create_pos_flow_cons(pos_flow_vars, row_offset, var_offset)
     neg_flow_constraints, max_row, max_var = create_neg_flow_cons(neg_flow_vars, max_row, max_var)
-    flow_cons = pd.concat([pos_flow_constraints, neg_flow_constraints]).reset_index(drop=True)
+    one_directional_flow_constraints = create_one_directional_flow_constraints(pos_flow_vars, neg_flow_vars, max_row, max_var)
+    flow_cons = pd.concat([pos_flow_constraints, neg_flow_constraints, one_directional_flow_constraints]).reset_index(drop=True)
     return flow_cons
 
+
+def create_one_directional_flow_constraints(pos_flow_vars, neg_flow_vars, max_row, max_var):
+    pos_flow_vars = pos_flow_vars[pos_flow_vars['UPPERBOUND'] > 0.0001]
+    pos_flow_vars = pos_flow_vars.sort_values('MWBREAKPOINT')
+    first_pos_flow_vars = pos_flow_vars.groupby('INTERCONNECTORID', as_index=False).first()
+    neg_flow_vars = neg_flow_vars[neg_flow_vars['UPPERBOUND'] > 0.0001]
+    neg_flow_vars = neg_flow_vars.sort_values('MWBREAKPOINT')
+    first_neg_flow_vars = neg_flow_vars.groupby('INTERCONNECTORID', as_index=False).last()
+    decision_variables  = save_index(first_neg_flow_vars.loc[:, ['INTERCONNECTORID']], 'INDEX', max_var + 1)
+    constraint_rows_neg = save_index(first_neg_flow_vars.loc[:, ['INTERCONNECTORID']], 'ROWINDEX', max_row + 1)
+    max_row = constraint_rows_neg['ROWINDEX'].max()
+    constraint_rows_pos = save_index(first_pos_flow_vars.loc[:, ['INTERCONNECTORID']], 'ROWINDEX', max_row + 1)
+    pos_flow_vars_coefficients = pd.merge(constraint_rows_pos, first_pos_flow_vars.loc[:, ['INDEX', 'INTERCONNECTORID', 'UPPERBOUND', 'MWBREAKPOINT']], 'inner', 'INTERCONNECTORID')
+    pos_flow_vars_coefficients['LHSCOEFFICIENTS'] = 1
+    pos_flow_vars_coefficients['RHSCONSTANT'] = 0
+    neg_flow_vars_coefficients = pd.merge(constraint_rows_neg, first_neg_flow_vars.loc[:, ['INDEX', 'INTERCONNECTORID', 'UPPERBOUND', 'MWBREAKPOINT']], 'inner', 'INTERCONNECTORID')
+    neg_flow_vars_coefficients['LHSCOEFFICIENTS'] = 1
+    neg_flow_vars_coefficients['RHSCONSTANT'] = neg_flow_vars_coefficients['UPPERBOUND']
+    vars_coefficients = pd.concat([pos_flow_vars_coefficients, neg_flow_vars_coefficients])
+    decision_coefficients = vars_coefficients.loc[:, ['INTERCONNECTORID', 'ROWINDEX', 'UPPERBOUND', 'MWBREAKPOINT']]
+    decision_coefficients = pd.merge(decision_coefficients, decision_variables, 'inner', 'INTERCONNECTORID')
+    decision_coefficients['LHSCOEFFICIENTS'] = np.where(decision_coefficients['MWBREAKPOINT'] > 0, -1 * decision_coefficients['UPPERBOUND'], decision_coefficients['UPPERBOUND'])
+    decision_coefficients['RHSCONSTANT'] = np.where(decision_coefficients['MWBREAKPOINT'] > 0, 0, decision_coefficients['UPPERBOUND'])
+    decision_coefficients['CAPACITYBAND'] = 'INTERTRIGGERVAR'
+    all_coefficients = pd.concat([decision_coefficients, vars_coefficients])
+    return all_coefficients
 
 def create_pos_flow_cons(pos_flow_vars, row_offset, var_offset):
     # Two constraints link the flow of adjacent segments such that a lower segment must reach full capacity before an

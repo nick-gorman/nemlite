@@ -17,7 +17,7 @@ def plot_error(me, aemo):
                     right_on=['SETTLEMENTDATE', 'REGIONID'])
     comp['ERROR'] = comp['Price'] - comp['RRP']
     error = np.asarray(comp['ERROR'])
-    plt.hist(error, bins=1000)
+    plt.hist(error, bins=100)
     mean_error = np.mean(abs(error))
     print(max(error))
     print(min(error))
@@ -28,7 +28,7 @@ def plot_error(me, aemo):
     plt.axvline(np.percentile(error, 95), color='r', linestyle= '--', linewidth=0.5)
     plt.legend()
 
-    plt.xlabel('Error \$ ($P_{estimate} - P_{actual}$)')
+    plt.xlabel('Error \$/MWh ($P_{estimate} - P_{actual}$)')
     plt.ylabel('Frequency')
     plt.title('Nemlite Backcast \n Energy Price Error Distribution \n {} to {}'.
               format(me_service['DateTime'].min()[:10], me_service['DateTime'].max()[:10]),
@@ -50,10 +50,11 @@ def plot_error_v_price(me, aemo):
     plt.plot(list(comp['RRP']), list(comp['ERROR']), 'ro', markersize=1)
     plt.plot(np.unique(comp['RRP']), np.poly1d(np.polyfit(comp['RRP'], comp['ERROR'], 1))(np.unique(comp['RRP'])))
     plt.title('Nemlite Error vs Price')
-    plt.ylabel('Error $/MWh')
+    plt.ylabel('Error \$/MWh ($P_{estimate} - P_{actual}$)')
+    plt.xlabel('Price $/MWh')
     ax.tick_params(labelsize=7)
-    plt.xlim([50, 150])
-    plt.ylim([-20, 40])
+   # plt.xlim([50, 150])
+  #  plt.ylim([-20, 40])
     return fig
 
 def plot_comp(me, aemo, region):
