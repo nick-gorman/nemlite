@@ -219,8 +219,8 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
 
     capacity_bids_raw = apply_fcas_enablement_criteria(capacity_bids_raw.copy(), unit_solution_raw.copy())
 
-    # Create a dataframe of the constraints that define generator capacity bids in the energy and FCAS markets. A
-    # dataframe that defines each variable used to represent the the bids in the linear program is also returned.
+    # Create a data frame of the constraints that define generator capacity bids in the energy and FCAS markets. A
+    # data frame that defines each variable used to represent the the bids in the linear program is also returned.
     bidding_constraints, bid_variable_data = create_bidding_contribution_to_constraint_matrix(capacity_bids_raw.copy(),
                                                                                               unit_solution_raw, ns)
 

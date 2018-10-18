@@ -1,4 +1,4 @@
-import filters as fl
+from osdan import filters as fl
 
 names = {'DISPATCHLOAD': 'PUBLIC_DVD_DISPATCHLOAD',
          'DUDETAILSUMMARY': 'PUBLIC_DVD_DUDETAILSUMMARY',

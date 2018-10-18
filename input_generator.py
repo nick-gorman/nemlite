@@ -1,10 +1,10 @@
 import nemlite_defaults
 import pandas as pd
-import defaults
-import query_wrapers
+from osdan import data_fetch_methods
+from osdan import defaults
+from osdan import query_wrapers
 from datetime import datetime, timedelta
 from joblib import Parallel, delayed
-import data_fetch_methods
 
 
 def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtered_data_folder, run_pre_filter=True):
@@ -20,10 +20,9 @@ def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtere
         with Parallel(n_jobs=1) as pool:
             # Pre filter dispatch constraint first as some tables are filtered based of its filtered files.
             run_pf('DISPATCHCONSTRAINT', start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
-            #Pre filter the rest of the tables.
+            # Pre filter the rest of the tables.
             pool(delayed(run_pf)(table, start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
                  for table in nemlite_defaults.parent_tables if table != 'DISPATCHCONSTRAINT')
-
 
     for date_time in date_times_generator_2:
         datetime_name = date_time.replace('/', '')
@@ -38,6 +37,7 @@ def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtere
             input_tables['region_constraints'], date_time, input_tables['interconnector_dynamic_loss_coefficients'],\
             input_tables['market_interconnectors'], input_tables['market_interconnector_price_bids'], \
             input_tables['market_interconnector_capacity_bids']
+
 
 def run_pf(table, start_time, end_time, raw_aemo_data_folder, filtered_data_folder):
     start_time_obj = datetime.strptime(start_time, '%Y/%m/%d %H:%M:%S')
@@ -213,8 +213,8 @@ def most_recent_version(data, table_name, group_cols):
 def datetime_dispatch_sequence(start_time, end_time, delta):
     # Generator to produce time stamps at set intervals. Requires a datetime object as an input, but outputs
     # the date time as string formatted as 'YYYY/MM/DD HH:MM:SS'.
-    curr = start_time
-    while curr < end_time:
+    curr = start_time + delta
+    while curr <= end_time:
         # Change the datetime object to a timestamp and modify it format by replacing characters.
         yield curr.isoformat().replace('T', ' ').replace('-', '/')
         curr += delta
