@@ -17,7 +17,7 @@ def plot_error(me, aemo):
                     right_on=['SETTLEMENTDATE', 'REGIONID'])
     comp['ERROR'] = comp['Price'] - comp['RRP']
     error = np.asarray(comp['ERROR'])
-    plt.hist(error, bins=1000)
+    plt.hist(error, bins=10000)
     mean_error = np.mean(abs(error))
     print(max(error))
     print(min(error))
