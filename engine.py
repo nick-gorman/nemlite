@@ -563,13 +563,24 @@ def create_bidding_contribution_to_constraint_matrix(capacity_bids, unit_solutio
 
     bids_and_data = pd.merge(bids_and_data,
                              capacity_bids.loc[:, ('DUID', 'BIDTYPE', 'MAXENERGY', 'MINENERGY', 'MAXAVAIL')],
+                                                  # 'RAMPUPRATE', 'RAMPDOWNRATE')],
                              'left', ['DUID', 'BIDTYPE'])
+
+    #bids_and_data = fcas_trapezium_scaling(bids_and_data)
 
     # For each type of bid variable and type of constraint set the constraint matrix coefficient value.
     bids_coefficients = add_lhs_coefficients(bids_and_data, ns)
     # For each type of constraint set the constraint matrix right hand side value.
     bids_all_data = add_rhs_constant(bids_coefficients, ns)
     return bids_all_data, bids_and_indexes
+
+
+def fcas_trapezium_scaling(bids_and_data):
+
+    bids_and_data['MAXAVAIL'] = np.where((bids_and_data['MAXAVAIL'] > bids_and_data['RAMPUPRATE']/12) &
+                                         (bids_and_data['BIDTYPE'] == 'RAISEREG'), bids_and_data['RAMPUPRATE']/12,
+                                         bids_and_data['MAXAVAIL'])
+    return bids_and_data
 
 
 def rationalise_max_energy_constraint(capacity_bids):

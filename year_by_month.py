@@ -5,7 +5,7 @@ year = 2017
 cbc_path = 'C:/Users/user/PycharmProjects/anvil/venv/Lib/site-packages/pulp/solverdir/cbc/win/64'
 regions_to_price = ['SA1', 'NSW1', 'QLD1', 'VIC1', 'TAS1']
 raw_data = 'E:/anvil_data/raw'
-filtered_data = 'E:/anvil_data/filtered'
+filtered_data = 'E:/nemlite_journal_results/filtered'
 results = 'E:/nemlite_journal_results/base_line'
 
 for month in range(1, 2):
@@ -17,4 +17,5 @@ for month in range(1, 2):
     inputs = input_generator.actual_inputs_replicator(start_time, end_time, raw_data, filtered_data, True)
     nemlite_results, objective_data_frame = engine.run(inputs, cbc_path, regions_to_price=regions_to_price,
                                                        save_to=results, feed_back=False)
-    nemlite_results.to_csv('E:/nemlite_journal_results/base_line_{}_{}.csv'.format(year, str(month).zfill(2)))
+    nemlite_results.to_csv('E:/nemlite_journal_results/correct_market_day_timing_{}_{}.csv'
+                           .format(year, str(month).zfill(2)))

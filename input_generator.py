@@ -134,20 +134,18 @@ def half_hour_peroids(data, save_location_formated, date_time, datetime_name, ta
 
 
 def settlement_just_date_filter(data, save_location_formated, date_time, datetime_name, table_name):
-    just_date = date_time[:10]
-    date_padding = ' 00:00:00'
-    date = just_date + date_padding
-    date = datetime.strptime(date, '%Y/%m/%d %H:%M:%S')
+    date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
+    date_time = date_time - timedelta(hours=4, seconds=1)
+    date = date_time.replace(hour=0, minute=0, second=0)
     data['SETTLEMENTDATE'] = pd.to_datetime(data['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
     data = data[(data['SETTLEMENTDATE'] == date)]
     return data
 
 
 def settlement_just_date_and_version_filter(data, save_location_formated, date_time, datetime_name, table_name):
-    just_date = date_time[:10]
-    date_padding = ' 00:00:00'
-    date = just_date + date_padding
-    date = datetime.strptime(date, '%Y/%m/%d %H:%M:%S')
+    date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
+    date_time = date_time - timedelta(hours=4, seconds=1)
+    date = date_time.replace(hour=0, minute=0, second=0)
     data['SETTLEMENTDATE'] = pd.to_datetime(data['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
     data = data[(data['SETTLEMENTDATE'] == date)]
     group_cols = defaults.effective_date_group_col[table_name]
