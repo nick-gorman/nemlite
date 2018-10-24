@@ -956,8 +956,45 @@ def create_inter_seg_dispatch_order_constraints(inter_var_indexes, row_offset, v
     neg_flow_vars = energy_only_indexes[energy_only_indexes['MWBREAKPOINT'] < 0]
     pos_flow_constraints, max_row, max_var = create_pos_flow_cons(pos_flow_vars, row_offset, var_offset)
     neg_flow_constraints, max_row, max_var = create_neg_flow_cons(neg_flow_vars, max_row, max_var)
-    flow_cons = pd.concat([pos_flow_constraints, neg_flow_constraints]).reset_index(drop=True)
+    one_directional_flow_constraints = create_one_directional_flow_constraints(pos_flow_vars, neg_flow_vars, max_row,
+                                                                               max_var)
+    flow_cons = pd.concat([pos_flow_constraints, neg_flow_constraints, one_directional_flow_constraints]).reset_index(
+        drop=True)
     return flow_cons
+
+
+def create_one_directional_flow_constraints(pos_flow_vars, neg_flow_vars, max_row, max_var):
+    pos_flow_vars = pos_flow_vars[pos_flow_vars['UPPERBOUND'] > 0.0001]
+    pos_flow_vars = pos_flow_vars.sort_values('MWBREAKPOINT')
+    first_pos_flow_vars = pos_flow_vars.groupby('INTERCONNECTORID', as_index=False).first()
+    neg_flow_vars = neg_flow_vars[neg_flow_vars['UPPERBOUND'] > 0.0001]
+    neg_flow_vars = neg_flow_vars.sort_values('MWBREAKPOINT')
+    first_neg_flow_vars = neg_flow_vars.groupby('INTERCONNECTORID', as_index=False).last()
+    decision_variables = save_index(first_neg_flow_vars.loc[:, ['INTERCONNECTORID']], 'INDEX', max_var + 1)
+    constraint_rows_neg = save_index(first_neg_flow_vars.loc[:, ['INTERCONNECTORID']], 'ROWINDEX', max_row + 1)
+    max_row = constraint_rows_neg['ROWINDEX'].max()
+    constraint_rows_pos = save_index(first_pos_flow_vars.loc[:, ['INTERCONNECTORID']], 'ROWINDEX', max_row + 1)
+    pos_flow_vars_coefficients = pd.merge(constraint_rows_pos, first_pos_flow_vars.loc[:,
+                                                               ['INDEX', 'INTERCONNECTORID', 'UPPERBOUND',
+                                                                'MWBREAKPOINT']], 'inner', 'INTERCONNECTORID')
+    pos_flow_vars_coefficients['LHSCOEFFICIENTS'] = 1
+    pos_flow_vars_coefficients['RHSCONSTANT'] = 0
+    neg_flow_vars_coefficients = pd.merge(constraint_rows_neg, first_neg_flow_vars.loc[:,
+                                                               ['INDEX', 'INTERCONNECTORID', 'UPPERBOUND',
+                                                                'MWBREAKPOINT']], 'inner', 'INTERCONNECTORID')
+    neg_flow_vars_coefficients['LHSCOEFFICIENTS'] = 1
+    neg_flow_vars_coefficients['RHSCONSTANT'] = neg_flow_vars_coefficients['UPPERBOUND']
+    vars_coefficients = pd.concat([pos_flow_vars_coefficients, neg_flow_vars_coefficients])
+    decision_coefficients = vars_coefficients.loc[:, ['INTERCONNECTORID', 'ROWINDEX', 'UPPERBOUND', 'MWBREAKPOINT']]
+    decision_coefficients = pd.merge(decision_coefficients, decision_variables, 'inner', 'INTERCONNECTORID')
+    decision_coefficients['LHSCOEFFICIENTS'] = np.where(decision_coefficients['MWBREAKPOINT'] > 0,
+                                                        -1 * decision_coefficients['UPPERBOUND'],
+                                                        decision_coefficients['UPPERBOUND'])
+    decision_coefficients['RHSCONSTANT'] = np.where(decision_coefficients['MWBREAKPOINT'] > 0, 0,
+                                                    decision_coefficients['UPPERBOUND'])
+    decision_coefficients['CAPACITYBAND'] = 'INTERTRIGGERVAR'
+    all_coefficients = pd.concat([decision_coefficients, vars_coefficients])
+    return all_coefficients
 
 
 def create_pos_flow_cons(pos_flow_vars, row_offset, var_offset):
