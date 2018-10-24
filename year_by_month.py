@@ -14,8 +14,9 @@ for month in range(1, 2):
         end_time = '2017/{}/01 00:00:00'.format(str(month + 1).zfill(2))  # exclusive
     else:
         end_time = '2018/01/01 00:00:00'
-    inputs = input_generator.actual_inputs_replicator(start_time, end_time, raw_data, filtered_data, True)
+    inputs = input_generator.actual_inputs_replicator(start_time, end_time, raw_data, filtered_data, False)
     nemlite_results, objective_data_frame = engine.run(inputs, cbc_path, regions_to_price=regions_to_price,
                                                        save_to=results, feed_back=False)
-    nemlite_results.to_csv('E:/nemlite_journal_results/correct_market_day_timing_{}_{}.csv'
+
+    nemlite_results.to_csv('E:/nemlite_journal_results/added_fcas_scaling2_{}_{}.csv'
                            .format(year, str(month).zfill(2)))

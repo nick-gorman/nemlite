@@ -14,11 +14,11 @@ for month in range(1, 2):
         end_time = '2017/{}/01 00:00:00'.format(str(month + 1).zfill(2))  # exclusive
     else:
         end_time = '2018/01/01 00:00:00'
-    nemlite_results = pd.read_csv('E:/nemlite_journal_results/correct_market_day_timing_{}_{}.csv'.format(year, str(month).zfill(2)))
+    nemlite_results = pd.read_csv('E:/nemlite_journal_results/added_fcas_scaling2_{}_{}.csv'.format(year, str(month).zfill(2)))
     actual_prices = data_fetch_methods.method_map['DISPATCHPRICE'](start_time, end_time, 'DISPATCHPRICE', raw_data, filter_cols=('INTERVENTION',),
                                 filter_values=(['0'],))
     actual_prices['SETTLEMENTDATE'] = actual_prices['SETTLEMENTDATE'].apply(lambda dt: dt.strftime('%Y/%m/%d %H:%M:%S'))
     actual_prices['RRP'] = pd.to_numeric(actual_prices['RRP'])
     db.construct_pdf(nemlite_results, actual_prices,
-                     'E:/nemlite_journal_results/correct_market_day_timing_{}_{}.pdf'.format(year, str(month).zfill(2)))
+                     'E:/nemlite_journal_results/added_fcas_scaling2_{}_{}.pdf'.format(year, str(month).zfill(2)))
 
