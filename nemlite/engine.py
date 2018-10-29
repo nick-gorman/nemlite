@@ -1,4 +1,3 @@
-import declare_names as dn
 import pandas as pd
 import pulp
 import numpy as np
@@ -8,9 +7,17 @@ import os
 import subprocess
 from joblib import Parallel, delayed
 from shutil import copyfile
+from nemlite import declare_names as dn
 
 
-def run(input_generator, cbc_path, save_to=None, regions_to_price=None, feed_back=False):
+def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditions, regulated_interconnectors,
+        regional_demand, dispatch_unit_price_bids, regulated_interconnectors_loss_model, connection_point_constraints,
+        interconnector_constraints, constraint_data, region_constraints, regulated_interconnector_loss_factor_model,
+        market_interconnectors, market_interconnector_price_bids, market_interconnector_capacity_bids):
+
+
+    cbc_path = os.path.dirname(pulp.__file__) + '\solverdir\cbc\win\\64'
+
     # Create an object that holds the AEMO names for data table column names.
     ns = dn.declare_names()
 
@@ -19,65 +26,38 @@ def run(input_generator, cbc_path, save_to=None, regions_to_price=None, feed_bac
     results_service = []
     results_state = []
     results_price = []
-    results_objective = []
-    objective_datetime = []
-    t1 = time()
-    # Loop through the inputs generator provided. This function uses a generator so that the input data tables are only
-    # loaded into memory as needed, as the input tables may be very large.
-    first_interval = True
+
+    regions_to_price = list(regional_demand['REGIONID'])
+
     with Parallel(n_jobs=6) as pool:
 
-        for [gen_info_raw, capacity_bids_raw, initial_conditions, inter_direct_raw,
-             region_req_raw, price_bids_raw, inter_seg_definitions, con_point_constraints, inter_gen_constraints,
-             gen_con_data, region_constraints, timestamp, inter_demand_coefficients, mnsp_inter, mnsp_price_bids,
-             mnsp_capacity_bids] \
-                in input_generator:
+        # Create a linear programing problem and definitions of the problem variables.
+        base_prob, var_definitions, inter_definitions, region_req_by_row,  name_index_to_row_index\
+            = create_problem(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditions, regulated_interconnectors,
+                             regional_demand, dispatch_unit_price_bids, regulated_interconnectors_loss_model,
+                             connection_point_constraints, interconnector_constraints, constraint_data,
+                             region_constraints, regulated_interconnector_loss_factor_model, market_interconnectors, market_interconnector_price_bids,
+                             market_interconnector_capacity_bids, ns)
 
-            if feed_back and not first_interval:
-                initial_conditions = perform_feedback_processing(dispatches, initial_conditions)
-            else:
-                first_interval = False
+        # Solve a number of variations of the base problem. These are the problem with the actual loads for each region
+        # and an extra solve for each region where a marginal load of 1 MW is added. The dispatches of each
+        # dispatch unit are returned for each solve, as well as the interconnector flows.
+        dispatches, inter_flows, objective_value = run_solves(base_prob, var_definitions, inter_definitions, ns,
+                                                              cbc_path, regions_to_price, pool, region_req_by_row,
+                                                              name_index_to_row_index)
 
-            # Create a linear programing problem and definitions of the problem variables.
-            base_prob, var_definitions, inter_definitions, region_req_by_row,  name_index_to_row_index\
-                = create_problem(gen_info_raw, capacity_bids_raw, initial_conditions, inter_direct_raw,
-                                 region_req_raw, price_bids_raw, inter_seg_definitions,
-                                 con_point_constraints, inter_gen_constraints, gen_con_data,
-                                 region_constraints, inter_demand_coefficients, mnsp_inter, mnsp_price_bids,
-                                 mnsp_capacity_bids, ns)
 
-            # Solve a number of variations of the base problem. These are the problem with the actual loads for each region
-            # and an extra solve for each region where a marginal load of 1 MW is added. The dispatches of each
-            # dispatch unit are returned for each solve, as well as the interconnector flows.
-            dispatches, inter_flows, objective_value = run_solves(base_prob, var_definitions, inter_definitions, ns,
-                                                                  cbc_path, regions_to_price, pool, region_req_by_row,
-                                                                  name_index_to_row_index)
-            results_objective.append(objective_value)
-            objective_datetime.append(timestamp)
-
-            # The price of energy in each region is calculated. This is done by comparing the results of the base dispatch
-            # with the results of dispatches with the marginal load added.
-            results_datetime, results_price, results_service, results_state = \
-                price_regions(dispatches['BASERUN'], dispatches, gen_info_raw, results_datetime, results_price,
-                              results_service, results_state, timestamp, regions_to_price)
-
-            # If a save location is provided then save the dispatch results for each solve.
-            if save_to is not None:
-                saving_timestamp = timestamp.replace('/', '').replace(' ', '_').replace(':', '')
-                inter_direct_raw.to_csv(save_to + '/inter_direct_raw_{}.csv'.format(saving_timestamp))
-                for suffix in dispatches:
-                    dispatches[suffix].to_csv(save_to + '/dispatch_{}_{}.csv'.format(saving_timestamp, suffix))
-                    inter_flows[suffix].to_csv(save_to + '/inter_flow_{}_{}.csv'.format(saving_timestamp, suffix))
-
-            print('Total {}'.format(time() - t1))
-            print(timestamp)
+        # The price of energy in each region is calculated. This is done by comparing the results of the base dispatch
+        # with the results of dispatches with the marginal load added.
+        results_price, results_service, results_state = \
+            price_regions(dispatches['BASERUN'], dispatches, dispatch_unit_information, results_price, results_service,
+                          results_state, regions_to_price)
 
     # Turn the results lists into a pandas dataframe, note currently only the energy service is priced.
-    results_dataframe = pd.DataFrame({'DateTime': results_datetime, 'State': results_state, 'Service': results_service,
+    results_dataframe = pd.DataFrame({'State': results_state, 'Service': results_service,
                                       'Price': results_price})
-    objective_data_frame = pd.DataFrame({'DateTime': objective_datetime, 'Objective': results_objective})
 
-    return results_dataframe, objective_data_frame
+    return results_dataframe, dispatches, inter_flows
 
 
 def perform_feedback_processing(results_of_previous_dispatch, dynamic_ramp_rates):
@@ -175,7 +155,6 @@ def create_problem(gen_info_raw: pd, capacity_bids_raw: pd, unit_solution_raw: p
     # market for a given interval, for a full description of each dataframe see supporting documentation.
 
     # Create the linear program as a series of data frames.
-    t3 = time()
     constraint_matrix, rhs_coefficients, objective_coefficients, number_of_variables, number_of_constraints, \
     var_definitions, inter_variable_bounds, inequality_type, inter_direct_raw, inter_penalty_factor, \
     indices, region_req_by_row, mnsp_link_indexes = \
@@ -184,15 +163,11 @@ def create_problem(gen_info_raw: pd, capacity_bids_raw: pd, unit_solution_raw: p
                                 ns, con_point_constraints, inter_gen_constraints, gen_con_data,
                                 region_constraints, inter_demand_coefficients, mnsp_inter, mnsp_price_bids,
                                 mnsp_capacity_bids)
-    print('Create dataframes {}'.format(time() - t3))
-
-    t4 = time()
     # Create the linear problem as a pulp object, pulp is an external tool for interfacing with linear solvers.
     lp = EnergyMarketLp(number_of_variables, number_of_constraints, var_definitions,
                                                  inter_variable_bounds, constraint_matrix, objective_coefficients,
                                                  rhs_coefficients, ns, inequality_type, inter_penalty_factor, indices,
                                                  region_req_by_row, mnsp_link_indexes)
-    print('Create pulp object {}'.format(time() - t4))
 
     # Initialise the pulp problem
     lp.pulp_setup()
@@ -228,15 +203,12 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
     # Find the current maximum index of the system constraints, so new constraints can be assigned correct unique
     # indexes.
     max_con_index = max_constraint_index(bidding_constraints)
-    t3 = time()
     joint_capacity_constraints = create_joint_capacity_constraints(bid_variable_data, capacity_bids_raw,
                                                                    unit_solution_raw, max_con_index)
-    print('joint cap cons {}'.format(time() - t3))
 
     # Create inter variables with indexes
     inter_variable_indexes = index_inter(inter_direct_raw, inter_seg_definitions, max_var_index, ns)
 
-    print('data frames first quarter {}'.format(time() - t1))
     # Create an upper bound for each inter variable
     inter_bounds = add_inter_bounds(inter_variable_indexes, inter_seg_definitions, ns)
 
@@ -260,11 +232,9 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
 
     # Create the coefficients that determine how much an interconnector contributes to meeting a regions requirements.
     # For each segment of an interconnector calculate its loss percentage.
-    t10 = time()
     inter_segments_loss_factors = calculate_loss_factors_for_inter_segments(inter_bounds.copy(), region_req_raw,
                                                                             inter_demand_coefficients, inter_direct_raw,
                                                                             ns)
-    print('inter loss factors {}'.format(time() - t10))
 
     # For each segment of an interconnector assign it indexes such that its flows are attributed to the correct regions.
     req_row_indexes_for_inter = create_req_row_indexes_for_inter(inter_segments_loss_factors, region_req_by_row, ns)
@@ -272,8 +242,6 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
     req_row_indexes_coefficients_for_inter = convert_contribution_coefficients(req_row_indexes_for_inter,
                                                                                inter_direct_raw, ns)
 
-    print('dataframes first half {}'.format(time() - t1))
-    t2 = time()
     # Filter out mnsp interconnectors that are not specified as type 'MNSP' in the general interconnector data.
     mnsp_inter = match_against_inter_data(mnsp_inter, inter_direct_raw)
 
@@ -339,7 +307,6 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
     # Convert the object function coefficients to a tuple format.
     objective_coefficients = create_objective_coefficients_tuple(objective_coefficients, number_of_variables, ns)
 
-    print('dataframes first half {}'.format(time() - t2))
     return constraint_matrix, rhs_coefficients, objective_coefficients, number_of_variables, number_of_constraints, \
            bid_variable_data, req_row_indexes_coefficients_for_inter, inequality_types, \
            inter_direct_raw, type_and_rhs, indices, region_req_by_row, mnsp_link_indexes
@@ -571,8 +538,7 @@ def create_bidding_contribution_to_constraint_matrix(capacity_bids, unit_solutio
     bids_and_data = pd.concat([bids_and_data, unit_min_energy_constraints], sort=False)  # type: pd.DataFrame
 
     bids_and_data = pd.merge(bids_and_data,
-                             capacity_bids.loc[:, ('DUID', 'BIDTYPE', 'MAXENERGY', 'MINENERGY', 'RAMPUPRATE',
-                                                   'RAMPDOWNRATE')],
+                             capacity_bids.loc[:, ('DUID', 'BIDTYPE', 'MAXENERGY', 'MINENERGY')],
                              'left', ['DUID', 'BIDTYPE'])
 
     # For each type of bid variable and type of constraint set the constraint matrix coefficient value.
@@ -675,8 +641,7 @@ def create_objective_coefficients(just_latest_price_bids, bids_all_data, duid_in
     objective_coefficients = add_capacity_band_type(objective_coefficients, ns)
     # Select the bid variables and just the data we need on them.
     bids_and_just_identifiers = bids_all_data.loc[:, (ns.col_unit_name, ns.col_bid_type, ns.col_capacity_band_number,
-                                                      ns.col_variable_index, ns.col_constraint_row_index,
-                                                      ns.col_dispatch_type, ns.col_loss_factor,
+                                                      ns.col_variable_index, ns.col_dispatch_type, ns.col_loss_factor,
                                                       'DISTRIBUTIONLOSSFACTOR')]
 
     # Map the extra data including the indexes to the objective function coefficients.
@@ -958,7 +923,8 @@ def create_inter_seg_dispatch_order_constraints(inter_var_indexes, row_offset, v
     neg_flow_constraints, max_row, max_var = create_neg_flow_cons(neg_flow_vars, max_row, max_var)
     one_directional_flow_constraints = create_one_directional_flow_constraints(pos_flow_vars, neg_flow_vars, max_row,
                                                                                max_var)
-    flow_cons = pd.concat([pos_flow_constraints, neg_flow_constraints, one_directional_flow_constraints]).reset_index(
+    flow_cons = pd.concat([pos_flow_constraints, neg_flow_constraints, one_directional_flow_constraints], sort=True
+                          ).reset_index(
         drop=True)
     return flow_cons
 
@@ -993,7 +959,7 @@ def create_one_directional_flow_constraints(pos_flow_vars, neg_flow_vars, max_ro
     decision_coefficients['RHSCONSTANT'] = np.where(decision_coefficients['MWBREAKPOINT'] > 0, 0,
                                                     decision_coefficients['UPPERBOUND'])
     decision_coefficients['CAPACITYBAND'] = 'INTERTRIGGERVAR'
-    all_coefficients = pd.concat([decision_coefficients, vars_coefficients])
+    all_coefficients = pd.concat([decision_coefficients, vars_coefficients], sort=True)
     return all_coefficients
 
 
@@ -1278,7 +1244,7 @@ def create_bidding_index(capacity_bids, ns):
     # Stack all the columns that represent an individual variable.
     cols_to_keep = [ns.col_unit_name, ns.col_bid_type]
     cols_to_stack = ns.cols_bid_cap_name_list.copy()
-    cols_to_stack.append(ns.col_fcas_integer_variable)
+    #cols_to_stack.append(ns.col_fcas_integer_variable)
     type_name = ns.col_capacity_band_number
     value_name = ns.col_bid_value
     stacked_bids = stack_columns(capacity_bids, cols_to_keep, cols_to_stack, type_name, value_name)
@@ -1938,18 +1904,17 @@ def find_price(base_dispatch, increased_dispatch, gen_info_raw):
     return marginal_price
 
 
-def price_regions(base_case_dispatch, pricing_dispatchs, gen_info_raw, results_datetime, results_price, results_service,
-                  results_state, date_time_gen, regions_to_price):
+def price_regions(base_case_dispatch, pricing_dispatchs, gen_info_raw, results_price, results_service,
+                  results_state, regions_to_price):
     # For the energy service find the marginal price in each region.
     service = 'ENERGY'
     for region in regions_to_price:
         price = find_price(base_case_dispatch, pricing_dispatchs[region], gen_info_raw)
-        results_datetime.append(date_time_gen)
         results_price.append(price)
         results_service.append(service)
         results_state.append(region)
 
-    return results_datetime, results_price, results_service, results_state
+    return  results_price, results_service, results_state
 
 
 def create_joint_capacity_constraints(bids_and_indexes, capacity_bids, initial_conditions, max_con):

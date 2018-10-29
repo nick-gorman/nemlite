@@ -1,0 +1,14 @@
+Metadata-Version: 2.1
+Name: nemlite
+Version: 0.0.4
+Summary: A tool for replicating the NEMDE dispatch procedure.
+Home-page: https://github.com/UNSW-CEEM/nemlite
+Author: Nicholas Gorman
+Author-email: n.gorman305@gmail.com
+License: UNKNOWN
+Description: A tool for replicating the NEMDE dispatch procedure.
+Platform: UNKNOWN
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: GNU General Public License (GPL)
+Classifier: Operating System :: OS Independent
+Description-Content-Type: text/markdown

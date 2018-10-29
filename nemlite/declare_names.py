@@ -1,4 +1,5 @@
-import standards as st
+import os
+from nemlite import standards as st
 
 
 def declare_names():
