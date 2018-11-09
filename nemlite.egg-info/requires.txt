@@ -1,4 +1,4 @@
 PuLP
 joblib
 pandas
-osdan
+nemosis

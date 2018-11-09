@@ -1,8 +1,8 @@
 import os
 import pandas as pd
-from osdan import data_fetch_methods
-from osdan import defaults
-from osdan import query_wrapers
+from nemosis import data_fetch_methods
+from nemosis import defaults
+from nemosis import query_wrapers
 from datetime import datetime, timedelta
 from joblib import Parallel, delayed
 from nemlite import nemlite_defaults
@@ -37,7 +37,7 @@ def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtere
             input_tables['interconnector_constraints'], input_tables['constraint_data'], \
             input_tables['region_constraints'], date_time, input_tables['interconnector_dynamic_loss_coefficients'],\
             input_tables['market_interconnectors'], input_tables['market_interconnector_price_bids'], \
-            input_tables['market_interconnector_capacity_bids']
+            input_tables['market_interconnector_capacity_bids'], input_tables['price_cap_and_floor']
 
 
 def run_pf(table, start_time, end_time, raw_aemo_data_folder, filtered_data_folder):
@@ -63,6 +63,11 @@ def load_and_merge(date_time_name, filtered_data):
             child_tables[child_table_name] = parent_tables[0]
         else:
             print('Parent table left unmerged')
+
+    child_tables['interconnector_segments'] = \
+        child_tables['interconnector_segments'][~child_tables['interconnector_segments']['INTERCONNECTORID']
+        .isin(child_tables['interconnectors'][child_tables['interconnectors']['ICTYPE'] == 'MNSP']['INTERCONNECTORID'])]
+
     return child_tables
 
 
@@ -128,7 +133,7 @@ def interval_datetime_filter(data, save_location_formated, date_time, datetime_n
 def half_hour_peroids(data, save_location_formated, date_time, datetime_name, table_name):
     date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
     data['SETTLEMENTDATE'] = pd.to_datetime(data['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
-    data = data[(data['SETTLEMENTDATE'] >= date_time - timedelta(minutes=30) ) & (data['SETTLEMENTDATE'] < date_time)]
+    data = data[(data['SETTLEMENTDATE'] > date_time) & (data['SETTLEMENTDATE'] - timedelta(minutes=30) <= date_time)]
     group_cols = defaults.effective_date_group_col[table_name]
     data = most_recent_version(data, table_name, group_cols)
     return data
@@ -193,7 +198,8 @@ def start_date_end_date_filter(data, save_location_formated, date_time, datetime
     data['END_DATE'] = pd.to_datetime(data['END_DATE'], format='%Y/%m/%d %H:%M:%S')
     data = data[(data['START_DATE'] <= date_time) & (data['END_DATE'] > date_time)]
     data = data.sort_values('END_DATE').groupby(['DUID', 'START_DATE'], as_index=False).first()
-    data = query_wrapers.most_recent_records_before_start_time(data, date_time, table_name)
+    data = data.sort_values('START_DATE').groupby(['DUID'], as_index=False).first()
+    #data = query_wrapers.most_recent_records_before_start_time(data, date_time, table_name)
     return data
 
 
@@ -203,7 +209,10 @@ def no_filter(data, save_location_formated, date_time, datetime_name, table_name
 
 def most_recent_version(data, table_name, group_cols):
     data = data.sort_values('VERSIONNO')
-    data_most_recent_v = data.groupby(group_cols, as_index=False).last()
+    if len(group_cols) > 0:
+        data_most_recent_v = data.groupby(group_cols, as_index=False).last()
+    else:
+        data_most_recent_v = data.tail(1)
     group_cols = group_cols + ['VERSIONNO']
     data_most_recent_v = pd.merge(data_most_recent_v.loc[:, group_cols], data, 'inner', group_cols)
     return data_most_recent_v
@@ -244,7 +253,8 @@ filter_map = {'SPDCONNECTIONPOINTCONSTRAINT': constraint_filter,
               'DISPATCHLOAD': settlement_date_filter,
               'LOSSMODEL': effective_date_and_version_filter_for_inter_seg,
               'LOSSFACTORMODEL': effective_date_and_version_filter,
-              'DISPATCHREGIONSUM': settlement_date_filter}
+              'DISPATCHREGIONSUM': settlement_date_filter,
+              'MARKET_PRICE_THRESHOLDS': effective_date_and_version_filter}
 
 
 

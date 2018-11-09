@@ -13,7 +13,8 @@ from nemlite import declare_names as dn
 def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditions, regulated_interconnectors,
         regional_demand, dispatch_unit_price_bids, regulated_interconnectors_loss_model, connection_point_constraints,
         interconnector_constraints, constraint_data, region_constraints, regulated_interconnector_loss_factor_model,
-        market_interconnectors, market_interconnector_price_bids, market_interconnector_capacity_bids):
+        market_interconnectors, market_interconnector_price_bids, market_interconnector_capacity_bids,
+        market_cap_and_floor):
 
 
     cbc_path = os.path.dirname(pulp.__file__) + '\solverdir\cbc\win\\64'
@@ -37,7 +38,7 @@ def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditio
                              regional_demand, dispatch_unit_price_bids, regulated_interconnectors_loss_model,
                              connection_point_constraints, interconnector_constraints, constraint_data,
                              region_constraints, regulated_interconnector_loss_factor_model, market_interconnectors, market_interconnector_price_bids,
-                             market_interconnector_capacity_bids, ns)
+                             market_interconnector_capacity_bids, ns, market_cap_and_floor)
 
         # Solve a number of variations of the base problem. These are the problem with the actual loads for each region
         # and an extra solve for each region where a marginal load of 1 MW is added. The dispatches of each
@@ -51,7 +52,7 @@ def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditio
         # with the results of dispatches with the marginal load added.
         results_price, results_service, results_state = \
             price_regions(dispatches['BASERUN'], dispatches, dispatch_unit_information, results_price, results_service,
-                          results_state, regions_to_price)
+                          results_state, regions_to_price, market_cap_and_floor)
 
     # Turn the results lists into a pandas dataframe, note currently only the energy service is priced.
     results_dataframe = pd.DataFrame({'State': results_state, 'Service': results_service,
@@ -149,7 +150,8 @@ def run_par(region):
 def create_problem(gen_info_raw: pd, capacity_bids_raw: pd, unit_solution_raw: pd, inter_direct_raw: pd,
                    region_req_raw: pd, price_bids_raw: pd, inter_seg_definitions: pd,
                    con_point_constraints, inter_gen_constraints, gen_con_data, region_constraints,
-                   inter_demand_coefficients, mnsp_inter, mnsp_price_bids, mnsp_capacity_bids, ns):
+                   inter_demand_coefficients, mnsp_inter, mnsp_price_bids, mnsp_capacity_bids, ns,
+                   market_cap_and_floor):
     # Create a linear problem that defines the national electricity market for a given 5 minute dispatch interval.
     # This requires a series of data tables in the form of pandas dataframes. Each dataframe defines an aspect of the
     # market for a given interval, for a full description of each dataframe see supporting documentation.
@@ -167,7 +169,7 @@ def create_problem(gen_info_raw: pd, capacity_bids_raw: pd, unit_solution_raw: p
     lp = EnergyMarketLp(number_of_variables, number_of_constraints, var_definitions,
                                                  inter_variable_bounds, constraint_matrix, objective_coefficients,
                                                  rhs_coefficients, ns, inequality_type, inter_penalty_factor, indices,
-                                                 region_req_by_row, mnsp_link_indexes)
+                                                 region_req_by_row, mnsp_link_indexes, market_cap_and_floor)
 
     # Initialise the pulp problem
     lp.pulp_setup()
@@ -723,7 +725,7 @@ def extend_3(self, other, use_objective=True):
 class EnergyMarketLp:
     def __init__(self, number_of_variables, number_of_constraints, bid_bounds, inter_bounds,
                  constraint_matrix, objective_coefficients, row_rhs_values, names, inequality_types,
-                 inter_penalty_factors, indices, region_req_by_row, mnsp_link_indexes):
+                 inter_penalty_factors, indices, region_req_by_row, mnsp_link_indexes, market_cap_and_floor):
 
         self.number_of_variables = number_of_variables
         self.number_of_constraints = number_of_constraints
@@ -741,6 +743,7 @@ class EnergyMarketLp:
         self.name_index_to_row_index = {}
         self.saved_region_cons = {}
         self.mnsp_link_indexes = mnsp_link_indexes
+        self.mcp = market_cap_and_floor['VOLL'][0]
 
     def pulp_setup(self):
         # --- Start Linear Program Definitions
@@ -807,7 +810,7 @@ class EnergyMarketLp:
                     print('missing types')
                 # Calculate the penalty associated with the constraint.
                 penalty = self.penalty_factors[self.penalty_factors['ROWINDEX'] == self.indices[i]][
-                              'CONSTRAINTWEIGHT'].reset_index(drop=True).loc[0] * 14000
+                              'CONSTRAINTWEIGHT'].reset_index(drop=True).loc[0] * self.mcp
                 # Convert the constraint to elastic so it can be broken at the cost of the penalty.
                 constraint = constraint.makeElasticSubProblem(penalty=penalty, proportionFreeBound=0)
                 extend_3(prob, constraint)
@@ -1905,11 +1908,15 @@ def find_price(base_dispatch, increased_dispatch, gen_info_raw):
 
 
 def price_regions(base_case_dispatch, pricing_dispatchs, gen_info_raw, results_price, results_service,
-                  results_state, regions_to_price):
+                  results_state, regions_to_price, market_cap_and_floor):
     # For the energy service find the marginal price in each region.
     service = 'ENERGY'
     for region in regions_to_price:
         price = find_price(base_case_dispatch, pricing_dispatchs[region], gen_info_raw)
+        if price < market_cap_and_floor['MARKETPRICEFLOOR'][0]:
+            price = market_cap_and_floor['MARKETPRICEFLOOR'][0]
+        if price > market_cap_and_floor['VOLL'][0]:
+            price = market_cap_and_floor['VOLL'][0]
         results_price.append(price)
         results_service.append(service)
         results_state.append(region)

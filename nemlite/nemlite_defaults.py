@@ -1,4 +1,4 @@
-from osdan import filters as fl
+from nemosis import filters as fl
 
 names = {'DISPATCHLOAD': 'PUBLIC_DVD_DISPATCHLOAD',
          'DUDETAILSUMMARY': 'PUBLIC_DVD_DUDETAILSUMMARY',
@@ -16,13 +16,14 @@ names = {'DISPATCHLOAD': 'PUBLIC_DVD_DISPATCHLOAD',
          'FCAS_4_SECOND': 'FCAS',
          'ELEMENTS_FCAS_4_SECOND': 'Elements_FCAS.csv',
          'VARIABLES_FCAS_4_SECOND': '820-0079 csv.csv',
-         'MASTER_REGISTRATION_LIST': 'NEM Registration and Exemption List'}
+         'MASTER_REGISTRATION_LIST': 'NEM Registration and Exemption List',
+         'MARKET_PRICE_THRESHOLDS': 'PUBLIC_DVD_MARKET_PRICE_THRESHOLDS'}
 
 parent_tables = ['DUDETAILSUMMARY', 'INTERCONNECTORCONSTRAINT', 'INTERCONNECTOR', 'LOSSMODEL', 'MNSP_INTERCONNECTOR',
                  'MNSP_PEROFFER', 'DISPATCHCONSTRAINT', 'BIDPEROFFER_D', 'DISPATCHLOAD', 'GENCONDATA',
                  'SPDCONNECTIONPOINTCONSTRAINT', 'SPDINTERCONNECTORCONSTRAINT', 'DISPATCHINTERCONNECTORRES',
                  'DISPATCHPRICE', 'SPDREGIONCONSTRAINT', 'BIDDAYOFFER_D', 'MNSP_DAYOFFER', 'LOSSFACTORMODEL',
-                 'DISPATCHREGIONSUM']
+                 'DISPATCHREGIONSUM', 'MARKET_PRICE_THRESHOLDS']
 
 child_parent_map = {'connection_point_constraints': ['SPDCONNECTIONPOINTCONSTRAINT'],
                     'constraint_data': ['GENCONDATA', 'DISPATCHCONSTRAINT'],
@@ -38,7 +39,8 @@ child_parent_map = {'connection_point_constraints': ['SPDCONNECTIONPOINTCONSTRAI
                     'initial_conditions': ['DISPATCHLOAD'],
                     'interconnector_segments': ['LOSSMODEL', 'DISPATCHINTERCONNECTORRES'],
                     'interconnector_dynamic_loss_coefficients': ['LOSSFACTORMODEL'],
-                    'demand': ['DISPATCHREGIONSUM']}
+                    'demand': ['DISPATCHREGIONSUM'],
+                    'price_cap_and_floor': ['MARKET_PRICE_THRESHOLDS']}
 
 parent_merge_cols = {'connection_point_constraints': None,
                      'constraint_data': ['GENCONID', 'EFFECTIVEDATE', 'VERSIONNO'],
@@ -54,7 +56,8 @@ parent_merge_cols = {'connection_point_constraints': None,
                      'initial_conditions': None,
                      'interconnector_segments': ['INTERCONNECTORID'],
                      'interconnector_dynamic_loss_coefficients': None,
-                     'demand': None}
+                     'demand': None,
+                     'price_cap_and_floor': None}
 
 required_cols = {'SPDCONNECTIONPOINTCONSTRAINT': None,
                  'GENCONDATA': None,
@@ -80,7 +83,8 @@ required_cols = {'SPDCONNECTIONPOINTCONSTRAINT': None,
                  'DISPATCHLOAD': None,
                  'LOSSMODEL': None,
                  'LOSSFACTORMODEL': None,
-                 'DISPATCHREGIONSUM': None}
+                 'DISPATCHREGIONSUM': None,
+                 'MARKET_PRICE_THRESHOLDS': ('VOLL', 'MARKETPRICEFLOOR')}
 
 wrapper_map = {'SPDCONNECTIONPOINTCONSTRAINT': None,
                'GENCONDATA': None,
@@ -100,6 +104,7 @@ wrapper_map = {'SPDCONNECTIONPOINTCONSTRAINT': None,
                'DISPATCHLOAD': fl.filter_on_settlementdate,
                'LOSSMODEL': fl.filter_on_effective_date,
                'LOSSFACTORMODEL': fl.filter_on_effective_date,
-               'DISPATCHREGIONSUM': fl.filter_on_settlementdate}
+               'DISPATCHREGIONSUM': fl.filter_on_settlementdate,
+               'MARKET_PRICE_THRESHOLDS': fl.filter_on_effective_date}
 
 aemo_data_suffix = 'PUBLIC_DVD_'

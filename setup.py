@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="nemlite",
-    version="0.0.4",
+    version="0.0.6",
     author="Nicholas Gorman",
     author_email="n.gorman305@gmail.com",
     description="A tool for replicating the NEMDE dispatch procedure.",
@@ -13,7 +13,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/UNSW-CEEM/nemlite",
     packages=setuptools.find_packages(),
-    install_requires=['PuLP', 'joblib', 'pandas', 'osdan'],
+    install_requires=['PuLP', 'joblib', 'pandas', 'nemosis'],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU General Public License (GPL)",
