@@ -5,11 +5,10 @@ See wiki for more information.
 Using the inbuilt historical input replicator 
 
 import nemlite
-import pandas as pd
-```
-# Note running this file as is will consume large amounts of disk space and take several weeks, probably try running it
-# for a much smaller time window first.
 
+import pandas as pd
+
+```python
 # Specify some locations to save data. Create and specify your own!
 raw_data = 'your folder path to cache raw data from AEMO'
 filtered_data = 'your folder path to save filtered AEMO data for running nemlite'
