@@ -15,8 +15,8 @@ filtered_data = 'your folder path to save filtered AEMO data for running nemlite
 
 # Specify the backcast period. Choose a short period, it will probably not work for some time back in history when the
 # AEMO data was structured differently.
-start_times = '2017/01/01 00:00:00'
-end_times = '2017/01/01 00:30:00'
+start_time = '2017/01/01 00:00:00'
+end_time = '2017/01/01 00:30:00'
 
 
 # Create an generator of actual historical NEMDE inputs.
