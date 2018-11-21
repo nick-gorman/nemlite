@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: nemlite
-Version: 0.0.6
+Version: 0.0.7
 Summary: A tool for replicating the NEMDE dispatch procedure.
 Home-page: https://github.com/UNSW-CEEM/nemlite
 Author: Nicholas Gorman

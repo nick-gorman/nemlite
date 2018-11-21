@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="nemlite",
-    version="0.0.6",
+    version="0.0.7",
     author="Nicholas Gorman",
     author_email="n.gorman305@gmail.com",
     description="A tool for replicating the NEMDE dispatch procedure.",
