@@ -8,6 +8,9 @@ import subprocess
 from joblib import Parallel, delayed
 from shutil import copyfile
 from nemlite import declare_names as dn
+import sys
+from pulp.constants import *
+from pulp.solvers import *
 
 
 def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditions, regulated_interconnectors,
@@ -43,10 +46,12 @@ def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditio
         # Solve a number of variations of the base problem. These are the problem with the actual loads for each region
         # and an extra solve for each region where a marginal load of 1 MW is added. The dispatches of each
         # dispatch unit are returned for each solve, as well as the interconnector flows.
+        t0 = time()
         dispatches, inter_flows, objective_value = run_solves(base_prob, var_definitions, inter_definitions, ns,
                                                               cbc_path, regions_to_price, pool, region_req_by_row,
                                                               name_index_to_row_index)
-
+        t1 = time()
+        print('Time to run solves {}'.format(t1-t0))
 
         # The price of energy in each region is calculated. This is done by comparing the results of the base dispatch
         # with the results of dispatches with the marginal load added.
@@ -89,41 +94,55 @@ def run_solves(base_prob, var_definitions, inter_definitions, ns, cbc_path, regi
     # For each region that will be price calculate and additional solution. Now the base problem is modified so that
     # the region being priced is dispatched with an additonal 1 MW of load. This dispatch is used for pricing purposes
     # only.
-    base_prob.prob.writeLP('BASERUN.lp')
+    t0 = time()
+    #base_prob.prob.writeLP('BASERUN.lp')
     vs, variablesNames, constraintsNames, objectiveName = base_prob.prob.writeMPS('BASERUN-pulp.mps', rename=1)
+    t1 = time()
+    print('time to perform base write {}'.format(t1-t0))
+    t0 = time()
+    # Open the file and replace the actual load with marginal load.
+
+    with open('BASERUN-pulp.mps', 'r') as file:
+        filedata = file.read()
+    t1 = time()
+    print('time to perform base read {}'.format(t1-t0))
+
+    t0 = time()
+    files = []
     for region in regions_to_price:
         # Is faster to make a copy of the lp and mps files from the base run then write a new one for each region.
-        copyfile('BASERUN' + '.lp', '{}.lp'.format(region))
-        copyfile('BASERUN-pulp.mps', '{}-pulp.mps'.format(region))
 
         # Find the name of the constraint that forces load to be met in each region and the load.
         name, load = regional_load_constraint_name(region_req_by_row, region, 'ENERGY', name_index_to_row_index,
                                                    base_prob.prob.constraints)
-
-        # Open the file and replace the actual load with marginal load.
-        with open('{}-pulp.mps'.format(region), 'r') as file:
-            filedata = file.read()
-        # Replace the target string
-        filedata = filedata.replace("%-8s  % .12e\n" % (constraintsNames[name], -1 * load),
-                                    "%-8s  % .12e\n" % (constraintsNames[name], -1 * (load - 1)))
-        # Write the file out again
-        with open('{}-pulp.mps'.format(region), 'w') as file:
-            file.write(filedata)
+        region_filedata = filedata.replace("%-8s  % .12e\n" % (constraintsNames[name], -1 * load),
+                                           "%-8s  % .12e\n" % (constraintsNames[name], -1 * (load - 1)))
+        files.append(region_filedata)
+    t1 = time()
+    print('time to create files {}'.format(t1 - t0))
 
     # Solve the linear problems in parallel.
-    pool(delayed(run_par)(region) for region in regions_to_price + ['BASERUN'])
+    t0 = time()
+    values_list = pool(delayed(run_par)(filedata, region)
+                       for filedata, region in
+                       zip(files + ['dummy'], regions_to_price + ['BASERUN']))
+    t1 = time()
+    print('time in parrallel mode {}'.format(t1-t0))
 
+    t0 = time()
     # Read the solution files and used the solutoin values to find the dispatch and interconnector flows.
     for region in regions_to_price + ['BASERUN']:
+        # base_prob.prob.assignVarsVals(values)
         tmpSol = '{}-pulp.sol'.format(region)
         base_prob.prob.status, values, reducedCosts, shadowPrices, slacks \
             = pulp.COIN_CMD().readsol_MPS(tmpSol, base_prob.prob, base_prob.prob.variables(),
                                           variablesNames, constraintsNames, objectiveName)
-        # base_prob.prob.assignVarsVals(values)
         solution = base_prob.prob
         dispatches[region] = gen_outputs_new(values, var_definitions, ns, base_prob.variables)
         inter_flows[region] = gen_outputs_new(values, inter_definitions, ns, base_prob.variables)
         objective_value = solution.objective.value()
+    t1 = time()
+    print('time to read {}'.format(t1-t0))
 
     return dispatches, inter_flows, objective_value
 
@@ -138,13 +157,15 @@ def regional_load_constraint_name(region_req_by_row, region, bidtype, name_index
     return name, load
 
 
-def run_par(region):
+def run_par(filedata, region):
+    if filedata != 'dummy':
+        with open('{}-pulp.mps'.format(region), 'w') as file:
+            file.write(filedata)
     cmd = 'cbc.exe {}-pulp.mps branch printingOptions all solution {}-pulp.sol '.format(region, region)
     pipe = open(os.devnull, 'w')
     cbc = subprocess.Popen((cmd).split(), stdout=pipe, stderr=pipe)
     if cbc.wait() != 0:
         raise ("Pulp: Error while trying to execute ")
-    return
 
 
 def create_problem(gen_info_raw: pd, capacity_bids_raw: pd, unit_solution_raw: pd, inter_direct_raw: pd,
@@ -166,13 +187,18 @@ def create_problem(gen_info_raw: pd, capacity_bids_raw: pd, unit_solution_raw: p
                                 region_constraints, inter_demand_coefficients, mnsp_inter, mnsp_price_bids,
                                 mnsp_capacity_bids)
     # Create the linear problem as a pulp object, pulp is an external tool for interfacing with linear solvers.
+    t0 = time()
     lp = EnergyMarketLp(number_of_variables, number_of_constraints, var_definitions,
                                                  inter_variable_bounds, constraint_matrix, objective_coefficients,
                                                  rhs_coefficients, ns, inequality_type, inter_penalty_factor, indices,
                                                  region_req_by_row, mnsp_link_indexes, market_cap_and_floor)
-
-    # Initialise the pulp problem
+    t1 = time()
+    print('time to make instance lp {}'.format(t1-t0))
+    t0 = time()
     lp.pulp_setup()
+    t1 = time()
+    print('time to write pulp lp {}'.format(t1-t0))
+    # Initialise the pulp problem
 
     return lp, var_definitions, inter_variable_bounds, region_req_by_row,  lp.name_index_to_row_index
 
@@ -182,7 +208,7 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
                             ns, con_point_constraints, inter_gen_constraints, gen_con_data,
                             region_constraints, inter_demand_coefficients, mnsp_inter, mnsp_price_bids,
                             mnsp_capacity_bids):
-    t1 = time()
+    t0 = time()
     # Convert data formatted in the style and layout of AEMO public data files to the format of a linear program, i.e
     # return a constraint matrix, objective function, also return additional information needed to create a pulp lp
     # object.
@@ -202,12 +228,14 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
     # Find the current maximum index of the system variable, so new variable can be assigned correct unique indexes.
     max_var_index = max_variable_index(bidding_constraints)
 
+    ta = time()
     # Find the current maximum index of the system constraints, so new constraints can be assigned correct unique
     # indexes.
     max_con_index = max_constraint_index(bidding_constraints)
     joint_capacity_constraints = create_joint_capacity_constraints(bid_variable_data, capacity_bids_raw,
                                                                    unit_solution_raw, max_con_index)
-
+    t1 = time()
+    print('time to create joint cons {}'.format(t1-ta))
     # Create inter variables with indexes
     inter_variable_indexes = index_inter(inter_direct_raw, inter_seg_definitions, max_var_index, ns)
 
@@ -231,6 +259,7 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
 
     # Create the coefficients that determine how much a generator contributes to meeting a regions requirements.
     req_row_coefficients = create_region_req_coefficients(duid_info, region_req_by_row, bid_variable_data, ns)
+
 
     # Create the coefficients that determine how much an interconnector contributes to meeting a regions requirements.
     # For each segment of an interconnector calculate its loss percentage.
@@ -261,6 +290,8 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
     # Create mnsp generic constraint data.
     mnsp_con_data = pd.merge(mnsp_link_indexes, mnsp_inter, 'inner', 'LINKID')
     mnsp_con_data = mnsp_con_data.loc[:, ('INTERCONNECTORID', 'LHSFACTOR', 'INDEX')]
+
+
 
     # Create generic constraints, these are the generally the network constraints calculated by AEMO.
     max_con_index = max_constraint_index(region_req_by_row)
@@ -308,6 +339,9 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
 
     # Convert the object function coefficients to a tuple format.
     objective_coefficients = create_objective_coefficients_tuple(objective_coefficients, number_of_variables, ns)
+
+    t1 = time()
+    print('time to create prob dfs {}'.format(t1-t0))
 
     return constraint_matrix, rhs_coefficients, objective_coefficients, number_of_variables, number_of_constraints, \
            bid_variable_data, req_row_indexes_coefficients_for_inter, inequality_types, \
@@ -746,6 +780,8 @@ class EnergyMarketLp:
         self.mcp = market_cap_and_floor['VOLL'][0]
 
     def pulp_setup(self):
+        t = time()
+        t0 = time()
         # --- Start Linear Program Definitions
         prob = pulp.LpProblem("energymarket", pulp.LpMinimize)
         # Create the set of market variables.
@@ -782,15 +818,25 @@ class EnergyMarketLp:
         np_gen_vars = np.asarray(list(variables.values()))
         np_constraint_matrix = np.asarray(constraint_matrix)
         gen_var_values = list(variables.values())
-
         # Add the market constraints to the linear problem.
+        self.penalty_factors = self.penalty_factors.set_index('ROWINDEX')
+        print('time at start of lp setup {}'.format(time() - t0))
+        t_pfs = 0
+        t_nrm = 0
+        t_scl = 0
+        t0 = time()
         for i in range(self.number_of_constraints):
             # Record the mapping between the index used to name a constraint internally to the pulp code and the row
             # index it is given in nemlite. This mapping allows constraints to be identified by the nemlite index and
             # modified later.
-            self.name_index_to_row_index[self.indices[i]] = i + 1
+            index = self.indices[i]
+            self.name_index_to_row_index[index] = i + 1
             # If a constraint uses a penalty factor it needs to be added to the problem in a specific way.
-            if self.indices[i] in penalty_factor_indexes:
+            tc = time()
+            flag = index in self.penalty_factors.index
+            t_scl += time() - tc
+            if flag:
+                ta = time()
                 # Select the indexes of the variables used in the constraint.
                 indx = np.nonzero(np_constraint_matrix[i])
                 # Select the names of the variables used in the constraint.
@@ -809,12 +855,13 @@ class EnergyMarketLp:
                 else:
                     print('missing types')
                 # Calculate the penalty associated with the constraint.
-                penalty = self.penalty_factors[self.penalty_factors['ROWINDEX'] == self.indices[i]][
-                              'CONSTRAINTWEIGHT'].reset_index(drop=True).loc[0] * self.mcp
+                penalty = self.penalty_factors['CONSTRAINTWEIGHT'].loc[index] * self.mcp
                 # Convert the constraint to elastic so it can be broken at the cost of the penalty.
                 constraint = constraint.makeElasticSubProblem(penalty=penalty, proportionFreeBound=0)
                 extend_3(prob, constraint)
+                t_pfs += time() - ta
             else:
+                tb = time()
                 # If no penalty factors are associated with the constraint add the constraint with optimised procedure
                 # implemented below.
                 # Select the indexes of the variables used in the constraint.
@@ -832,9 +879,16 @@ class EnergyMarketLp:
                     prob += pulp.lpSum(v) == row_rhs_values[i]
                 else:
                     print('missing types')
-
+                t_nrm += time() - tb
+        t1 = time()
+        print('time to add pf cons {}'.format(t_pfs))
+        print('time to add nrm cons {}'.format(t_nrm))
+        print('time at start of con loop {}'.format(t_scl))
         # Assign the pulp problem to the nemlite level object.
         self.prob = prob
+        t1 = time()
+        print('time con loop {}'.format(time() - t0))
+        print('time inside setup {}'.format(time() - t))
 
     def add_marginal_load(self, region, bidtype):
         # Add the marginal load of the region and bid type given. This is done modifying the constraint that forces
@@ -1929,12 +1983,16 @@ def create_joint_capacity_constraints(bids_and_indexes, capacity_bids, initial_c
     # bidding into
     bid_type_check = bids_and_indexes.copy()
     bid_type_check = bid_type_check.loc[:, ('DUID', 'BIDTYPE')]
-    bid_type_check = bid_type_check.groupby(['DUID', 'BIDTYPE'], as_index=False).first()
+    t0 = time()
+   # bid_type_check = bid_type_check.groupby(['DUID', 'BIDTYPE'], as_index=False).first()
+    bid_type_check = bid_type_check.drop_duplicates()
+    t1 = time()
     bid_type_check['PRESENT'] = 1
     bid_type_check = bid_type_check.pivot('DUID', 'BIDTYPE', 'PRESENT')
     bid_type_check = bid_type_check.fillna(0)
     bid_type_check['DUID'] = bid_type_check.index
 
+    print('time to do bidtype check {}'.format(t1-t0))
     combined_joint_capacity_constraints = pd.DataFrame()
 
     for fcas_service in ['RAISE6SEC', 'RAISE60SEC', 'RAISE5MIN', 'LOWER6SEC', 'LOWER60SEC', 'LOWER5MIN',
