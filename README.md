@@ -33,20 +33,20 @@ for [dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditions,
      market_interconnectors, market_interconnector_price_bids, market_interconnector_capacity_bids,
      market_cap_and_floor] in inputs:
 
-     nemlite_results, dispatches, inter_flows = nemlite.run(dispatch_unit_information, dispatch_unit_capacity_bids,
-                                                            initial_conditions, interconnectors,
-                                                            regional_demand, dispatch_unit_price_bids,
-                                                            regulated_interconnectors_loss_model,
-                                                            connection_point_constraints,
-                                                            interconnector_constraints, constraint_data,
-                                                            region_constraints,
-                                                            regulated_interconnector_loss_factor_model,
-                                                            market_interconnectors, market_interconnector_price_bids,
-                                                            market_interconnector_capacity_bids,
-                                                            market_cap_and_floor)
+     price_results, dispatches, inter_flows = nemlite.run(dispatch_unit_information, dispatch_unit_capacity_bids,
+                                                          initial_conditions, interconnectors,
+                                                          regional_demand, dispatch_unit_price_bids,
+                                                          regulated_interconnectors_loss_model,
+                                                          connection_point_constraints,
+                                                          interconnector_constraints, constraint_data,
+                                                          region_constraints,
+                                                          regulated_interconnector_loss_factor_model,
+                                                          market_interconnectors, market_interconnector_price_bids,
+                                                          market_interconnector_capacity_bids,
+                                                          market_cap_and_floor)
 
-      nemlite_results['DateTime'] = timestamp
-      nemlite_results_cumulative = pd.concat([nemlite_results_cumulative, nemlite_results])
+      price_results['DateTime'] = timestamp
+      nemlite_results_cumulative = pd.concat([nemlite_results_cumulative, price_results])
       print(timestamp)
 
 nemlite_results_cumulative.to_csv('your_path/price_results_{}_{}.csv'.format(start_time[:4], start_time[5:7]))
