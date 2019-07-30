@@ -31,6 +31,11 @@ def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtere
         datetime_name = datetime_name.replace(":", "")
         input_tables = load_and_merge(datetime_name, filtered_data_folder)
 
+        input_tables['interconnector_constraints'].loc[:, 'ICTYPE'] = "REGULATED"
+        input_tables['market_interconnectors'] = input_tables['market_interconnectors'][0:0]
+        input_tables['market_interconnector_capacity_bids'] = input_tables['market_interconnector_capacity_bids'][0:0]
+        input_tables['market_interconnector_price_bids'] = input_tables['market_interconnector_price_bids'][0:0]
+
         yield input_tables['generator_information'], input_tables['capacity_bids'], input_tables['initial_conditions'],\
             input_tables['interconnectors'], input_tables['demand'], input_tables['price_bids'], \
             input_tables['interconnector_segments'], input_tables['connection_point_constraints'], \
@@ -64,11 +69,14 @@ def load_and_merge(date_time_name, filtered_data):
         else:
             print('Parent table left unmerged')
 
+    child_tables['interconnectors'].loc[:, 'ICTYPE'] = "REGULATED"
+
     child_tables['interconnector_segments'] = \
         child_tables['interconnector_segments'][~child_tables['interconnector_segments']['INTERCONNECTORID']
         .isin(child_tables['interconnectors'][child_tables['interconnectors']['ICTYPE'] == 'MNSP']['INTERCONNECTORID'])]
 
     return child_tables
+
 
 
 def pre_filter(start_time, end_time, table, date_time_sequence, raw_data_location, filtered_data):
