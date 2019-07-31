@@ -8,6 +8,7 @@ import subprocess
 from joblib import Parallel, delayed
 from shutil import copyfile
 from nemlite import declare_names as dn
+from time import time
 
 
 def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditions, regulated_interconnectors,
@@ -15,7 +16,7 @@ def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditio
         interconnector_constraints, constraint_data, region_constraints, regulated_interconnector_loss_factor_model,
         market_interconnectors, market_interconnector_price_bids, market_interconnector_capacity_bids,
         market_cap_and_floor):
-
+    t0 = time()
 
     cbc_path = os.path.dirname(pulp.__file__) + '\solverdir\cbc\win\\64'
 
@@ -58,6 +59,7 @@ def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditio
     results_dataframe = pd.DataFrame({'State': results_state, 'Service': results_service,
                                       'Price': results_price})
 
+    print("Time in run {}".format(time()-t0))
     return results_dataframe, dispatches, inter_flows
 
 
@@ -76,6 +78,7 @@ def perform_feedback_processing(results_of_previous_dispatch, dynamic_ramp_rates
 
 def run_solves(base_prob, var_definitions, inter_definitions, ns, cbc_path, regions_to_price, pool,
                region_req_by_row, name_index_to_row_index):
+    t0 = time()
     # Run the solves required to price given regions. This always includes a base solves and then one additional
     # solve for each region to be priced.
 
@@ -125,6 +128,7 @@ def run_solves(base_prob, var_definitions, inter_definitions, ns, cbc_path, regi
         inter_flows[region] = gen_outputs_new(values, inter_definitions, ns, base_prob.variables)
         objective_value = solution.objective.value()
 
+    print(" Time in run_solves {}".format(time() - t0))
     return dispatches, inter_flows, objective_value
 
 
@@ -152,6 +156,7 @@ def create_problem(gen_info_raw: pd, capacity_bids_raw: pd, unit_solution_raw: p
                    con_point_constraints, inter_gen_constraints, gen_con_data, region_constraints,
                    inter_demand_coefficients, mnsp_inter, mnsp_price_bids, mnsp_capacity_bids, ns,
                    market_cap_and_floor):
+    t0 = time()
     # Create a linear problem that defines the national electricity market for a given 5 minute dispatch interval.
     # This requires a series of data tables in the form of pandas dataframes. Each dataframe defines an aspect of the
     # market for a given interval, for a full description of each dataframe see supporting documentation.
@@ -173,7 +178,7 @@ def create_problem(gen_info_raw: pd, capacity_bids_raw: pd, unit_solution_raw: p
 
     # Initialise the pulp problem
     lp.pulp_setup()
-
+    print(" Time in create_problem {}".format(time() - t0))
     return lp, var_definitions, inter_variable_bounds, region_req_by_row,  lp.name_index_to_row_index
 
 
@@ -182,7 +187,7 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
                             ns, con_point_constraints, inter_gen_constraints, gen_con_data,
                             region_constraints, inter_demand_coefficients, mnsp_inter, mnsp_price_bids,
                             mnsp_capacity_bids):
-    t1 = time()
+    t0 = time()
     # Convert data formatted in the style and layout of AEMO public data files to the format of a linear program, i.e
     # return a constraint matrix, objective function, also return additional information needed to create a pulp lp
     # object.
@@ -308,7 +313,7 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
 
     # Convert the object function coefficients to a tuple format.
     objective_coefficients = create_objective_coefficients_tuple(objective_coefficients, number_of_variables, ns)
-
+    print("     Time in create_lp_as_dataframes {}".format(time() - t0))
     return constraint_matrix, rhs_coefficients, objective_coefficients, number_of_variables, number_of_constraints, \
            bid_variable_data, req_row_indexes_coefficients_for_inter, inequality_types, \
            inter_direct_raw, type_and_rhs, indices, region_req_by_row, mnsp_link_indexes
@@ -746,6 +751,7 @@ class EnergyMarketLp:
         self.mcp = market_cap_and_floor['VOLL'][0]
 
     def pulp_setup(self):
+        t0 = time()
         # --- Start Linear Program Definitions
         prob = pulp.LpProblem("energymarket", pulp.LpMinimize)
         # Create the set of market variables.
@@ -784,6 +790,14 @@ class EnergyMarketLp:
         gen_var_values = list(variables.values())
 
         # Add the market constraints to the linear problem.
+        t2 = time()
+        ta = 0
+        tb = 0
+        tc = 0
+        td = 0
+        te = 0
+        tf = 0
+        tg = 0
         for i in range(self.number_of_constraints):
             # Record the mapping between the index used to name a constraint internally to the pulp code and the row
             # index it is given in nemlite. This mapping allows constraints to be identified by the nemlite index and
@@ -791,6 +805,8 @@ class EnergyMarketLp:
             self.name_index_to_row_index[self.indices[i]] = i + 1
             # If a constraint uses a penalty factor it needs to be added to the problem in a specific way.
             if self.indices[i] in penalty_factor_indexes:
+                ta0 = time()
+                tg0 = time()
                 # Select the indexes of the variables used in the constraint.
                 indx = np.nonzero(np_constraint_matrix[i])
                 # Select the names of the variables used in the constraint.
@@ -800,6 +816,8 @@ class EnergyMarketLp:
                 # Create an object representing the left hand side of the constraint.
                 lhs = pulp.LpAffineExpression(zip(gen_var_values, cm))
                 # Add the constraint based on its inequality type.
+                tg += time() - tg0
+                te0 = time()
                 if inequality_types[i] == 'equal_or_less':
                     constraint = pulp.LpConstraint(lhs, pulp.LpConstraintLE, rhs=row_rhs_values[i], name='{}'.format(i))
                 elif inequality_types[i] == 'equal_or_greater':
@@ -808,13 +826,22 @@ class EnergyMarketLp:
                     constraint = pulp.LpConstraint(lhs, pulp.LpConstraintEQ, rhs=row_rhs_values[i], name='{}'.format(i))
                 else:
                     print('missing types')
+                te += time() - te0
                 # Calculate the penalty associated with the constraint.
+                tf0 = time()
                 penalty = self.penalty_factors[self.penalty_factors['ROWINDEX'] == self.indices[i]][
                               'CONSTRAINTWEIGHT'].reset_index(drop=True).loc[0] * self.mcp
+                tf += time() - tf0
                 # Convert the constraint to elastic so it can be broken at the cost of the penalty.
+                td0 = time()
                 constraint = constraint.makeElasticSubProblem(penalty=penalty, proportionFreeBound=0)
+                td += time() - td0
+                tc0 = time()
                 extend_3(prob, constraint)
+                tc += time() - tc0
+                ta += time() - ta0
             else:
+                tb0 = time()
                 # If no penalty factors are associated with the constraint add the constraint with optimised procedure
                 # implemented below.
                 # Select the indexes of the variables used in the constraint.
@@ -832,9 +859,20 @@ class EnergyMarketLp:
                     prob += pulp.lpSum(v) == row_rhs_values[i]
                 else:
                     print('missing types')
+                tb += time() - tb0
+
+        print("                 Time in pulp_setup adding cons penalties residual {}".format(tg))
+        print("                 Time in pulp_setup adding cons penalties LpConstraint {}".format(tf))
+        print("                 Time in pulp_setup adding cons penalties LpConstraint {}".format(te))
+        print("                 Time in pulp_setup adding cons penalties makeElastic {}".format(td))
+        print("                 Time in pulp_setup adding cons penalties extend3 {}".format(tc))
+        print("             Time in pulp_setup adding cons penalties {}".format(ta))
+        print("             Time in pulp_setup adding cons no penalties {}".format(tb))
+        print("         Time in pulp_setup adding cons {}".format(time() - t0))
 
         # Assign the pulp problem to the nemlite level object.
         self.prob = prob
+        print("     Time in pulp_setup {}".format(time() - t0))
 
     def add_marginal_load(self, region, bidtype):
         # Add the marginal load of the region and bid type given. This is done modifying the constraint that forces
