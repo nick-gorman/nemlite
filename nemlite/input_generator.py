@@ -9,14 +9,13 @@ from nemlite import nemlite_defaults
 
 
 def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtered_data_folder, run_pre_filter=True):
-
-    # Create a datetime generator for generator for each process that iterates over each 5 minutes interval in the
+    # Create a datetime generator for each process that iterates over each 5 minutes interval in the
     # start to end time window.
     delta = timedelta(minutes=5)
     start_time_obj = datetime.strptime(start_time, '%Y/%m/%d %H:%M:%S')
     end_time_obj = datetime.strptime(end_time, '%Y/%m/%d %H:%M:%S')
-
     date_times_generator_2 = datetime_dispatch_sequence(start_time_obj, end_time_obj, delta)
+
     if run_pre_filter:
         with Parallel(n_jobs=1) as pool:
             # Pre filter dispatch constraint first as some tables are filtered based of its filtered files.
@@ -25,7 +24,11 @@ def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtere
             pool(delayed(run_pf)(table, start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
                  for table in nemlite_defaults.parent_tables if table != 'DISPATCHCONSTRAINT')
 
-    for date_time in date_times_generator_2:
+    return actual_inputs_replicator(date_times_generator_2, filtered_data_folder)
+
+
+def actual_inputs_generator(date_time_iterator, filtered_data_folder):
+    for date_time in date_time_iterator:
         datetime_name = date_time.replace('/', '')
         datetime_name = datetime_name.replace(" ", "_")
         datetime_name = datetime_name.replace(":", "")
