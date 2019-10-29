@@ -24,7 +24,7 @@ def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtere
             pool(delayed(run_pf)(table, start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
                  for table in nemlite_defaults.parent_tables if table != 'DISPATCHCONSTRAINT')
 
-    return actual_inputs_replicator(date_times_generator_2, filtered_data_folder)
+    return actual_inputs_generator(date_times_generator_2, filtered_data_folder)
 
 
 def actual_inputs_generator(date_time_iterator, filtered_data_folder):
