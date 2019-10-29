@@ -78,7 +78,7 @@ def perform_feedback_processing(results_of_previous_dispatch, dynamic_ramp_rates
 
 def run_solves(base_prob, var_definitions, inter_definitions, ns, cbc_path, regions_to_price, pool,
                region_req_by_row, name_index_to_row_index):
-    t0 = time()
+    ta = time()
     # Run the solves required to price given regions. This always includes a base solves and then one additional
     # solve for each region to be priced.
 
@@ -92,8 +92,11 @@ def run_solves(base_prob, var_definitions, inter_definitions, ns, cbc_path, regi
     # For each region that will be price calculate and additional solution. Now the base problem is modified so that
     # the region being priced is dispatched with an additonal 1 MW of load. This dispatch is used for pricing purposes
     # only.
+    t0 = time()
     base_prob.prob.writeLP('BASERUN.lp')
     vs, variablesNames, constraintsNames, objectiveName = base_prob.prob.writeMPS('BASERUN-pulp.mps', rename=1)
+    print("     Time in base_prob.prob.writeMPS {}".format(time() - t0))
+    t0 = time()
     for region in regions_to_price:
         # Is faster to make a copy of the lp and mps files from the base run then write a new one for each region.
         copyfile('BASERUN' + '.lp', '{}.lp'.format(region))
@@ -112,10 +115,12 @@ def run_solves(base_prob, var_definitions, inter_definitions, ns, cbc_path, regi
         # Write the file out again
         with open('{}-pulp.mps'.format(region), 'w') as file:
             file.write(filedata)
-
+    print("     Time in modify initial prob {}".format(time() - t0))
     # Solve the linear problems in parallel.
+    t0 = time()
     pool(delayed(run_par)(region) for region in regions_to_price + ['BASERUN'])
-
+    print("     Time in run_par {}".format(time() - t0))
+    t0 = time()
     # Read the solution files and used the solutoin values to find the dispatch and interconnector flows.
     for region in regions_to_price + ['BASERUN']:
         tmpSol = '{}-pulp.sol'.format(region)
@@ -127,8 +132,8 @@ def run_solves(base_prob, var_definitions, inter_definitions, ns, cbc_path, regi
         dispatches[region] = gen_outputs_new(values, var_definitions, ns, base_prob.variables)
         inter_flows[region] = gen_outputs_new(values, inter_definitions, ns, base_prob.variables)
         objective_value = solution.objective.value()
-
-    print(" Time in run_solves {}".format(time() - t0))
+    print("     Time in read solutions {}".format(time() - t0))
+    print(" Time in run_solves {}".format(time() - ta))
     return dispatches, inter_flows, objective_value
 
 
@@ -676,6 +681,7 @@ def create_objective_coefficients(just_latest_price_bids, bids_all_data, duid_in
 
 
 def create_lp_constraint_matrix(coefficient_data_list: list, ns: object):
+    t0 = time()
     # Reformat constraint matrix data so that variable indexes are the columns, and the constraints are the rows.
     # Then convert it to a list of tuples where each tuple is a row.
 
@@ -688,7 +694,9 @@ def create_lp_constraint_matrix(coefficient_data_list: list, ns: object):
     combined_data_matrix_format = combined_data_matrix_format.fillna(0)
     # Convert to list of tuples.
     constraint_matrix = combined_data_matrix_format.values
-    return constraint_matrix, combined_data_matrix_format.index.values
+    index = combined_data_matrix_format.index.values
+    print("         Time in create_lp_constraint_matrix {}".format(time() - t0))
+    return constraint_matrix, index
 
 
 def extend_3(self, other, use_objective=True):
