@@ -6,6 +6,8 @@ import os
 import subprocess
 import numpy as np
 import re
+from mip import Model, xsum, minimize, INTEGER
+
 
 class EnergyMarketLp:
     def __init__(self, number_of_variables, number_of_constraints, bid_bounds, inter_bounds,
@@ -32,30 +34,36 @@ class EnergyMarketLp:
 
     def pulp_setup(self):
         # --- Start Linear Program Definitions
-        prob = pulp.LpProblem("energymarket", pulp.LpMinimize)
+        # prob = pulp.LpProblem("energymarket", pulp.LpMinimize)
+        prob = Model("energymarket")
         # Create the set of market variables.
-        variables = pulp.LpVariable.dicts("Variables", list(range(self.number_of_variables)))
-        self.variables = dict((v.name, k) for k, v in variables.items())
+        #variables = pulp.LpVariable.dicts("Variables", list(range(self.number_of_variables)))
+        #self.variables = dict((v.name, k) for k, v in variables.items())
         # Set the properties of the market variables associated with the generators.
+        variables = {}
         for upper_bound, index, band_type in zip(list(self.bid_bounds[self.names.col_bid_value]),
                                                  list(self.bid_bounds[self.names.col_variable_index]),
                                                  list(self.bid_bounds[self.names.col_capacity_band_number])):
             # Set the upper bound of the variables, note the lower bound is always zero.
-            variables[int(index)].bounds(0, upper_bound)
+            #variables[int(index)].bounds(0, upper_bound)
             # The variables used to model the FCAS no FCAS decision are set to type integer. Note technically they
             # are binary decision variables, but this is achieved through a type of integer and an upper bound of 1.
             if (band_type == self.names.col_fcas_integer_variable) | (band_type == 'INTERTRIGGERVAR'):
-                variables[int(index)].cat = 'Integer'
+                #variables[int(index)].cat = 'Integer'
+                variables[index] = prob.add_var(lb=0, ub=upper_bound, var_type=INTEGER)
+            else:
+                variables[index] = prob.add_var(lb=0, ub=upper_bound)
 
         # Set the properties of the market variables associated with the interconnectors.
         for index, upper_bound in zip(list(self.inter_bounds[self.names.col_variable_index]),
                                       list(self.inter_bounds[self.names.col_upper_bound])):
-            variables[int(index)].bounds(0, upper_bound)
+            #variables[int(index)].bounds(0, upper_bound)
+            variables[index] =  prob.add_var(lb=0, ub=upper_bound)
 
         # Add the variables to the linear problem.
-        prob.addVariables(list(variables.values()))
+        #prob.addVariables(list(variables.values()))
         # Define objective function
-        prob += pulp.lpSum(self.objective_coefficients[i] * variables[i] for i in range(self.number_of_variables))
+        prob.objective = minimize(xsum(self.objective_coefficients[i] * variables[i] for i in range(self.number_of_variables)))
         # Create a list of the indexes of constraints to which penalty factors apply.
         penalty_factor_indexes = self.penalty_factors['ROWINDEX'].tolist()
         var_indexes = range(self.number_of_variables)
@@ -75,48 +83,49 @@ class EnergyMarketLp:
             # modified later.
             self.name_index_to_row_index[self.indices[i]] = i + 1
             # If a constraint uses a penalty factor it needs to be added to the problem in a specific way.
-            if self.indices[i] in penalty_factor_indexes:
+            #if self.indices[i] in penalty_factor_indexes:
                 # Select the indexes of the variables used in the constraint.
-                indx = np.nonzero(np_constraint_matrix[i])
+                #indx = np.nonzero(np_constraint_matrix[i])
                 # Select the names of the variables used in the constraint.
-                gen_var_values = np_gen_vars[indx].tolist()
+                #gen_var_values = np_gen_vars[indx].tolist()
                 # Select the the coefficients of the variables used in the constraint.
-                cm = np_constraint_matrix[i][indx].tolist()
+                #cm = np_constraint_matrix[i][indx].tolist()
                 # Create an object representing the left hand side of the constraint.
-                lhs = pulp.LpAffineExpression(zip(gen_var_values, cm))
+                #lhs = pulp.LpAffineExpression(zip(gen_var_values, cm))
                 # Add the constraint based on its inequality type.
-                if inequality_types[i] == 'equal_or_less':
-                    constraint = pulp.LpConstraint(lhs, pulp.LpConstraintLE, rhs=row_rhs_values[i], name='{}'.format(i))
-                elif inequality_types[i] == 'equal_or_greater':
-                    constraint = pulp.LpConstraint(lhs, pulp.LpConstraintGE, rhs=row_rhs_values[i], name='{}'.format(i))
-                elif inequality_types[i] == 'equal':
-                    constraint = pulp.LpConstraint(lhs, pulp.LpConstraintEQ, rhs=row_rhs_values[i], name='{}'.format(i))
-                else:
-                    print('missing types')
+                #if inequality_types[i] == 'equal_or_less':
+                #     constraint = pulp.LpConstraint(lhs, pulp.LpConstraintLE, rhs=row_rhs_values[i], name='{}'.format(i))
+                #elif inequality_types[i] == 'equal_or_greater':
+                 #   constraint = pulp.LpConstraint(lhs, pulp.LpConstraintGE, rhs=row_rhs_values[i], name='{}'.format(i))
+                #elif inequality_types[i] == 'equal':
+                #    constraint = pulp.LpConstraint(lhs, pulp.LpConstraintEQ, rhs=row_rhs_values[i], name='{}'.format(i))
+               # else:
+               #     print('missing types')
                 # Calculate the penalty associated with the constraint.
-                penalty = self.penalty_factors[self.penalty_factors['ROWINDEX'] == self.indices[i]][
-                              'CONSTRAINTWEIGHT'].reset_index(drop=True).loc[0] * self.mcp
+                #penalty = self.penalty_factors[self.penalty_factors['ROWINDEX'] == self.indices[i]][
+                #              'CONSTRAINTWEIGHT'].reset_index(drop=True).loc[0] * self.mcp
                 # Convert the constraint to elastic so it can be broken at the cost of the penalty.
-                constraint = constraint.makeElasticSubProblem(penalty=penalty, proportionFreeBound=0)
-                extend_3(prob, constraint)
-            else:
+                #constraint = constraint.makeElasticSubProblem(penalty=penalty, proportionFreeBound=0)
+                #extend_3(prob, constraint)
+
+            #else:
                 # If no penalty factors are associated with the constraint add the constraint with optimised procedure
                 # implemented below.
                 # Select the indexes of the variables used in the constraint.
-                indx = np.nonzero(np_constraint_matrix[i])
-                # Multiply the variables and the coefficients to form the lhs. Use numpy arrays for efficiency.
-                v = np_constraint_matrix[i][indx] * np_gen_vars[indx]
-                # Convert back to list for adding to problem.
-                v = v.tolist()
-                # Add based on inequality type.
-                if inequality_types[i] == 'equal_or_less':
-                    prob += pulp.lpSum(v) <= row_rhs_values[i]
-                elif inequality_types[i] == 'equal_or_greater':
-                    prob += pulp.lpSum(v) >= row_rhs_values[i]
-                elif inequality_types[i] == 'equal':
-                    prob += pulp.lpSum(v) == row_rhs_values[i]
-                else:
-                    print('missing types')
+            indx = np.nonzero(np_constraint_matrix[i])
+            # Multiply the variables and the coefficients to form the lhs. Use numpy arrays for efficiency.
+            v = np_constraint_matrix[i][indx] * np_gen_vars[indx]
+            # Convert back to list for adding to problem.
+            v = v.tolist()
+            # Add based on inequality type.
+            if inequality_types[i] == 'equal_or_less':
+                prob += xsum(v) <= row_rhs_values[i]
+            elif inequality_types[i] == 'equal_or_greater':
+                prob += xsum(v) >= row_rhs_values[i]
+            elif inequality_types[i] == 'equal':
+                prob += xsum(v) == row_rhs_values[i]
+            else:
+                print('missing types')
 
         # Assign the pulp problem to the nemlite level object.
         self.prob = prob
@@ -187,55 +196,9 @@ def run_solves(base_prob, var_definitions, inter_definitions, ns, regions_to_pri
                region_req_by_row, name_index_to_row_index):
     # Run the solves required to price given regions. This always includes a base solves and then one additional
     # solve for each region to be priced.
+    base_prob.optimize()
 
-    # Change the current directory to the location of the cbc solver.
-    cbc_path = os.path.dirname(pulp.__file__) + '\solverdir\cbc\win\\64'
-    os.chdir(cbc_path)
-
-    # Create dictionaries to save results in.
-    dispatches = {}
-    inter_flows = {}
-
-    # For each region that will be price calculate and additional solution. Now the base problem is modified so that
-    # the region being priced is dispatched with an additonal 1 MW of load. This dispatch is used for pricing purposes
-    # only.
-    base_prob.prob.writeLP('BASERUN.lp')
-    vs, variablesNames, constraintsNames, objectiveName = base_prob.prob.writeMPS('BASERUN-pulp.mps', rename=1)
-    for region in regions_to_price:
-        # Is faster to make a copy of the lp and mps files from the base run then write a new one for each region.
-        copyfile('BASERUN' + '.lp', '{}.lp'.format(region))
-        copyfile('BASERUN-pulp.mps', '{}-pulp.mps'.format(region))
-
-        # Find the name of the constraint that forces load to be met in each region and the load.
-        name, load = regional_load_constraint_name(region_req_by_row, region, 'ENERGY', name_index_to_row_index,
-                                                   base_prob.prob.constraints)
-
-        # Open the file and replace the actual load with marginal load.
-        with open('{}-pulp.mps'.format(region), 'r') as file:
-            filedata = file.read()
-        # Replace the target string
-        filedata = filedata.replace("%-8s  % .12e\n" % (constraintsNames[name], -1 * load),
-                                    "%-8s  % .12e\n" % (constraintsNames[name], -1 * (load - 1)))
-        # Write the file out again
-        with open('{}-pulp.mps'.format(region), 'w') as file:
-            file.write(filedata)
-
-    # Solve the linear problems in parallel.
-    pool(delayed(run_par)(region) for region in regions_to_price + ['BASERUN'])
-
-    # Read the solution files and used the solutoin values to find the dispatch and interconnector flows.
-    for region in regions_to_price + ['BASERUN']:
-        tmpSol = '{}-pulp.sol'.format(region)
-        base_prob.prob.status, values, reducedCosts, shadowPrices, slacks \
-            = pulp.COIN_CMD().readsol_MPS(tmpSol, base_prob.prob, base_prob.prob.variables(),
-                                          variablesNames, constraintsNames, objectiveName)
-        # base_prob.prob.assignVarsVals(values)
-        solution = base_prob.prob
-        dispatches[region] = gen_outputs_new(values, var_definitions, ns, base_prob.variables)
-        inter_flows[region] = gen_outputs_new(values, inter_definitions, ns, base_prob.variables)
-        objective_value = solution.objective.value()
-
-    return dispatches, inter_flows, objective_value
+    return None
 
 
 def regional_load_constraint_name(region_req_by_row, region, bidtype, name_index_to_row_index, constraints):
