@@ -26,19 +26,26 @@ def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditio
     with Parallel(n_jobs=6) as pool:
 
         # Create a linear programing problem and definitions of the problem variables.
-        base_prob, var_definitions, inter_definitions, region_req_by_row,  name_index_to_row_index\
-            = create_problem(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditions, regulated_interconnectors,
-                             regional_demand, dispatch_unit_price_bids, regulated_interconnectors_loss_model,
-                             connection_point_constraints, interconnector_constraints, constraint_data,
-                             region_constraints, regulated_interconnector_loss_factor_model, market_interconnectors, market_interconnector_price_bids,
-                             market_interconnector_capacity_bids, ns, market_cap_and_floor)
+        constraint_matrix, rhs_coefficients, objective_coefficients, number_of_variables, number_of_constraints, \
+        var_definitions, inter_variable_bounds, inequality_type, inter_direct_raw, inter_penalty_factor, \
+        indices, region_req_by_row, mnsp_link_indexes, inter_seg_dispatch_order_constraints, \
+        mnsp_region_requirement_coefficients = \
+            create_lp_as_dataframes(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditions,
+                                    regulated_interconnectors,
+                                    regional_demand, dispatch_unit_price_bids, regulated_interconnectors_loss_model,
+                                    ns, connection_point_constraints, interconnector_constraints, constraint_data,
+                                    region_constraints, regulated_interconnector_loss_factor_model,
+                                    market_interconnectors, market_interconnector_price_bids,
+                                    market_interconnector_capacity_bids)
 
         # Solve a number of variations of the base problem. These are the problem with the actual loads for each region
         # and an extra solve for each region where a marginal load of 1 MW is added. The dispatches of each
         # dispatch unit are returned for each solve, as well as the interconnector flows.
-        dispatches, inter_flows, objective_value = solver_interface.run_solves(base_prob, var_definitions, inter_definitions, ns,
-                                                              regions_to_price, pool, region_req_by_row,
-                                                              name_index_to_row_index)
+        dispatches = solver_interface.solve_lp(number_of_variables, number_of_constraints, var_definitions,
+                                                 inter_variable_bounds, constraint_matrix, objective_coefficients,
+                                                 rhs_coefficients, ns, inequality_type, inter_penalty_factor, indices,
+                                                 region_req_by_row, mnsp_link_indexes, market_cap_and_floor,
+                                         inter_seg_dispatch_order_constraints, mnsp_region_requirement_coefficients)
 
 
         # The price of energy in each region is calculated. This is done by comparing the results of the base dispatch
@@ -67,9 +74,6 @@ def perform_feedback_processing(results_of_previous_dispatch, dynamic_ramp_rates
     return initial_conditions
 
 
-
-
-
 def create_problem(gen_info_raw: pd, capacity_bids_raw: pd, unit_solution_raw: pd, inter_direct_raw: pd,
                    region_req_raw: pd, price_bids_raw: pd, inter_seg_definitions: pd,
                    con_point_constraints, inter_gen_constraints, gen_con_data, region_constraints,
@@ -82,17 +86,19 @@ def create_problem(gen_info_raw: pd, capacity_bids_raw: pd, unit_solution_raw: p
     # Create the linear program as a series of data frames.
     constraint_matrix, rhs_coefficients, objective_coefficients, number_of_variables, number_of_constraints, \
     var_definitions, inter_variable_bounds, inequality_type, inter_direct_raw, inter_penalty_factor, \
-    indices, region_req_by_row, mnsp_link_indexes = \
+    indices, region_req_by_row, mnsp_link_indexes, inter_seg_dispatch_order_constraints,\
+    mnsp_region_requirement_coefficients = \
         create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, inter_direct_raw,
                                 region_req_raw, price_bids_raw, inter_seg_definitions,
                                 ns, con_point_constraints, inter_gen_constraints, gen_con_data,
                                 region_constraints, inter_demand_coefficients, mnsp_inter, mnsp_price_bids,
                                 mnsp_capacity_bids)
     # Create the linear problem as a pulp object, pulp is an external tool for interfacing with linear solvers.
-    lp = EnergyMarketLp(number_of_variables, number_of_constraints, var_definitions,
+    lp = solver_interface.EnergyMarketLp(number_of_variables, number_of_constraints, var_definitions,
                                                  inter_variable_bounds, constraint_matrix, objective_coefficients,
                                                  rhs_coefficients, ns, inequality_type, inter_penalty_factor, indices,
-                                                 region_req_by_row, mnsp_link_indexes, market_cap_and_floor)
+                                                 region_req_by_row, mnsp_link_indexes, market_cap_and_floor,
+                                         inter_seg_dispatch_order_constraints, mnsp_region_requirement_coefficients)
 
     # Initialise the pulp problem
     lp.pulp_setup()
@@ -171,7 +177,7 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
     mnsp_inter = match_against_inter_data(mnsp_inter, inter_direct_raw)
 
     # Create a set of indexes for the mnsp links.
-    max_var_index = max_variable_index(inter_seg_dispatch_order_constraints)
+    #max_var_index = max_variable_index(inter_seg_dispatch_order_constraints)
     mnsp_link_indexes = create_mnsp_link_indexes(mnsp_capacity_bids, max_var_index)
 
     # Create contribution coefficients for mnsp link variables.
@@ -197,7 +203,7 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
                              req_row_coefficients,
                              req_row_indexes_coefficients_for_inter,
                              generic_constraints,
-                             inter_seg_dispatch_order_constraints,
+                        #     inter_seg_dispatch_order_constraints,
                              mnsp_region_requirement_coefficients,
                              joint_capacity_constraints]
     constraint_matrix, indices = create_lp_constraint_matrix(coefficient_data_list, ns)
@@ -215,12 +221,13 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
 
     # Create RHS constant values.
     rhs_coefficients = rhs_coefficients_in_tuple([bidding_constraints, region_req_by_row, type_and_rhs,
-                                                  inter_seg_dispatch_order_constraints,
+                                                  #inter_seg_dispatch_order_constraints,
                                                   joint_capacity_constraints], ns)
 
     # List of inequality types.
     inequality_types = create_inequality_types(bidding_constraints, region_req_by_row, type_and_rhs,
-                                               inter_seg_dispatch_order_constraints, joint_capacity_constraints,
+                                               inter_seg_dispatch_order_constraints,
+                                               joint_capacity_constraints,
                                                ns)
 
     # Calculate the number of system variables.
@@ -234,7 +241,8 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
 
     return constraint_matrix, rhs_coefficients, objective_coefficients, number_of_variables, number_of_constraints, \
            bid_variable_data, req_row_indexes_coefficients_for_inter, inequality_types, \
-           inter_direct_raw, type_and_rhs, indices, region_req_by_row, mnsp_link_indexes
+           inter_direct_raw, type_and_rhs, indices, region_req_by_row, mnsp_link_indexes, \
+           inter_seg_dispatch_order_constraints, mnsp_region_requirement_coefficients
 
 
 def create_duid_version_of_link_data(link_data):
@@ -1480,7 +1488,8 @@ def create_inequality_types(bids: pd, region_req: pd, generic_type, inter_seg_di
                  joint_capacity_constraints[ns.col_enquality_type])
 
     # Combine type data, sort by row index and convert to type list.
-    combined_type_data = pd.concat([bids, region_req, generic_type, inter_seg_dispatch_order_constraints,
+    combined_type_data = pd.concat([bids, region_req, generic_type,
+                                   # inter_seg_dispatch_order_constraints,
                                     joint_capacity_constraints], sort=False)
     combined_type_data = combined_type_data.sort_values([ns.col_constraint_row_index], ascending=True)
     combined_type_data = list(combined_type_data[ns.col_enquality_type])
