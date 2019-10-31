@@ -41,11 +41,12 @@ def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditio
         # Solve a number of variations of the base problem. These are the problem with the actual loads for each region
         # and an extra solve for each region where a marginal load of 1 MW is added. The dispatches of each
         # dispatch unit are returned for each solve, as well as the interconnector flows.
-        dispatches = solver_interface.solve_lp(number_of_variables, number_of_constraints, var_definitions,
+        dispatches, inter_flows = solver_interface.solve_lp(number_of_variables, number_of_constraints, var_definitions,
                                                  inter_variable_bounds, constraint_matrix, objective_coefficients,
                                                  rhs_coefficients, ns, inequality_type, inter_penalty_factor, indices,
                                                  region_req_by_row, mnsp_link_indexes, market_cap_and_floor,
-                                         inter_seg_dispatch_order_constraints, mnsp_region_requirement_coefficients)
+                                         inter_seg_dispatch_order_constraints, mnsp_region_requirement_coefficients,
+                                               regions_to_price)
 
 
         # The price of energy in each region is calculated. This is done by comparing the results of the base dispatch

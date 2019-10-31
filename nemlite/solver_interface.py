@@ -12,7 +12,8 @@ from mip import Model, xsum, minimize, INTEGER
 def solve_lp(number_of_variables, number_of_constraints, bid_bounds, inter_bounds,
              constraint_matrix, objective_coefficients, row_rhs_values, names, inequality_types,
              inter_penalty_factors, indices, region_req_by_row, mnsp_link_indexes, market_cap_and_floor,
-             inter_seg_dispatch_order_constraints, mnsp_region_requirement_coefficients):
+             inter_seg_dispatch_order_constraints, mnsp_region_requirement_coefficients, regions_to_price):
+
     # --- Start Linear Program Definitions
     # prob = pulp.LpProblem("energymarket", pulp.LpMinimize)
     prob = Model("energymarket")
@@ -32,15 +33,15 @@ def solve_lp(number_of_variables, number_of_constraints, bid_bounds, inter_bound
         # are binary decision variables, but this is achieved through a type of integer and an upper bound of 1.
         if (band_type == names.col_fcas_integer_variable) | (band_type == 'INTERTRIGGERVAR'):
             #variables[int(index)].cat = 'Integer'
-            variables[index] = prob.add_var(lb=0, ub=upper_bound, var_type=INTEGER)
+            variables[index] = prob.add_var(lb=0, ub=upper_bound, var_type=INTEGER, name=str(index))
         else:
-            variables[index] = prob.add_var(lb=0, ub=upper_bound)
+            variables[index] = prob.add_var(lb=0, ub=upper_bound, name=str(index))
 
     # Set the properties of the market variables associated with the interconnectors.
     for index, upper_bound in zip(list(inter_bounds[names.col_variable_index]),
                                   list(inter_bounds[names.col_upper_bound])):
         #variables[int(index)].bounds(0, upper_bound)
-        variables[index] = prob.add_var(lb=0, ub=upper_bound)
+        variables[index] = prob.add_var(lb=0, ub=upper_bound, name=str(index))
 
     inter_trigger_vars = inter_seg_dispatch_order_constraints[inter_seg_dispatch_order_constraints['CAPACITYBAND']=='INTERTRIGGERVAR'].drop_duplicates(subset='INDEX')
     for index, upper_bound in zip(list(inter_trigger_vars[names.col_variable_index]),
@@ -78,7 +79,7 @@ def solve_lp(number_of_variables, number_of_constraints, bid_bounds, inter_bound
         # Record the mapping between the index used to name a constraint internally to the pulp code and the row
         # index it is given in nemlite. This mapping allows constraints to be identified by the nemlite index and
         # modified later.
-        name_index_to_row_index[indices[i]] = i + 1
+        name_index_to_row_index[indices[i]] = i
         # If a constraint uses a penalty factor it needs to be added to the problem in a specific way.
         #if self.indices[i] in penalty_factor_indexes:
             # Select the indexes of the variables used in the constraint.
@@ -116,32 +117,69 @@ def solve_lp(number_of_variables, number_of_constraints, bid_bounds, inter_bound
         v = v.tolist()
         # Add based on inequality type.
         if inequality_types[i] == 'equal_or_less':
-            prob += xsum(v) <= row_rhs_values[i]
+            prob.add_constr(xsum(v) <= row_rhs_values[i], name=str(indices[i]))
         elif inequality_types[i] == 'equal_or_greater':
-            prob += xsum(v) >= row_rhs_values[i]
+            prob.add_constr(xsum(v) >= row_rhs_values[i], name=str(indices[i]))
         elif inequality_types[i] == 'equal':
-            prob += xsum(v) == row_rhs_values[i]
+            prob.add_constr(xsum(v) == row_rhs_values[i], name=str(indices[i]))
         else:
             print('missing types')
 
-    prob.optimize()
+    solutions = {}
+    dispatches = {}
+    inter_flows = {}
+    base_prob = prob.copy()
+    base_prob.optimize()
+    solutions['BASERUN'] = base_prob.vars
+    dispatches['BASERUN'] = gen_outputs(solutions['BASERUN'], bid_bounds, names)
+    inter_flows['BASERUN'] = gen_outputs(solutions['BASERUN'], inter_bounds, names)
+    for region in regions_to_price:
+        #prob_marginal = add_marginal_load(prob, region, 'ENERGY', region_req_by_row, name_index_to_row_index,
+        #                                  v, row_rhs_values, indices)
+        prob_marginal = prob.copy()
+        row_index = region_req_by_row[(region_req_by_row['REGIONID'] == region) &
+                                      (region_req_by_row['BIDTYPE'] == 'ENERGY')]['ROWINDEX'].values[0]
+        constraint = prob_marginal.constrs[name_index_to_row_index[row_index]]
+        prob_marginal.remove(constraint)
+        i = name_index_to_row_index[row_index]
+        indx = np.nonzero(np_constraint_matrix[i])
+        # Multiply the variables and the coefficients to form the lhs. Use numpy arrays for efficiency.
+        v = np_constraint_matrix[i][indx] * np_gen_vars[indx]
+        # Convert back to list for adding to problem.
+        v = v.tolist()
+        # Add based on inequality type.
+        if inequality_types[i] == 'equal_or_less':
+            prob_marginal.add_constr(xsum(v) <= row_rhs_values[i] + 1, name=str(indices[i]))
+        elif inequality_types[i] == 'equal_or_greater':
+            prob_marginal.add_constr(xsum(v) >= row_rhs_values[i] + 1, name=str(indices[i]))
+        elif inequality_types[i] == 'equal':
+            prob_marginal.add_constr(xsum(v) == row_rhs_values[i] + 1, name=str(indices[i]))
+        else:
+            print('missing types')
+        prob_marginal.optimize()
+        solutions[region] = prob_marginal.vars
+        dispatches[region] = gen_outputs(solutions[region], bid_bounds, names)
+        inter_flows[region] = gen_outputs(solutions[region], inter_bounds, names)
 
-    return None
+    return dispatches, inter_flows
 
 
-def add_marginal_load(prob, region, bidtype):
+def add_marginal_load(prob, region, bidtype, region_req_by_row, name_index_to_row_index, v, row_rhs_values, indices):
+    prob = prob.copy()
     # Add the marginal load of the region and bid type given. This is done modifying the constraint that forces
     # a regions load to be met.
     # Find the nemlite level index of the region and bid type.
-    row_index = prob.region_req_by_row[(prob.region_req_by_row['REGIONID'] == region) &
-                                       (prob.region_req_by_row['BIDTYPE'] == bidtype)]['ROWINDEX'].values[0]
-    # Map the nemlite level index to the index used in the pulp object.
-    name_i = self.name_index_to_row_index[row_index]
+    row_index = region_req_by_row[(region_req_by_row['REGIONID'] == region) &
+                                  (region_req_by_row['BIDTYPE'] == bidtype)]['ROWINDEX'].values[0]
     # Modify the constraint to its original value minus 1. Minus 1 is used at the load constraint is defined as a
     # negative value.
-    load = prob.prob.constraints['_C' + str(name_i)].constant
-    self.prob.constraints['_C' + str(name_i)].constant = self.prob.constraints['_C' + str(name_i)].constant - 1
-    return '_C' + str(name_i), load
+    constraint = prob.constrs[name_index_to_row_index[row_index]]
+    prob.remove(constraint)
+
+
+
+    #self.prob.constraints['_C' + str(name_i)].constant = self.prob.constraints['_C' + str(name_i)].constant - 1
+    return None
 
 
 def remove_marginal_load(prob, region, bidtype):
@@ -227,14 +265,14 @@ def gen_outputs(solution, var_definitions, ns):
     dispatched = []
     name = []
 
-    for variable in solution.variables():
+    for variable in solution:
         # Skip dummy variables that do not correspond to and actual market variable.
         if (variable.name == "__dummy") | ('elastic' in variable.name):
             continue
         # Process the variables name to retrive its index value.
-        index.append(int(re.findall('\d+', variable.name)[-1]))
+        index.append(int(variable.name))
         # Set the variables solution value as the dispatch value.
-        dispatched.append(variable.value())
+        dispatched.append(variable.x)
         # Record the variables name.
         name.append(variable.name)
 
