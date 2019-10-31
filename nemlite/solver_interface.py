@@ -13,7 +13,6 @@ def solve_lp(number_of_variables, number_of_constraints, bid_bounds, inter_bound
              constraint_matrix, objective_coefficients, row_rhs_values, names, inequality_types,
              inter_penalty_factors, indices, region_req_by_row, mnsp_link_indexes, market_cap_and_floor,
              inter_seg_dispatch_order_constraints, mnsp_region_requirement_coefficients, regions_to_price):
-
     # --- Start Linear Program Definitions
     # prob = pulp.LpProblem("energymarket", pulp.LpMinimize)
     prob = Model("energymarket")
