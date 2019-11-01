@@ -6,7 +6,7 @@ import os
 import subprocess
 import numpy as np
 import re
-from mip import Model, xsum, minimize, INTEGER
+from mip import Model, xsum, minimize, INTEGER, OptimizationStatus
 
 
 def solve_lp(number_of_variables, number_of_constraints, bid_bounds, inter_bounds,
@@ -128,7 +128,18 @@ def solve_lp(number_of_variables, number_of_constraints, bid_bounds, inter_bound
     dispatches = {}
     inter_flows = {}
     base_prob = prob.copy()
-    base_prob.optimize()
+    status = base_prob.optimize()
+    if status != OptimizationStatus.OPTIMAL:
+        print('{} problem'.format(status.name))
+        for con in base_prob.constrs:
+            con_index = con.name
+            print('removing con {}'.format(con.name))
+            base_prob.remove(con)
+            status = base_prob.optimize()
+            if status == OptimizationStatus.OPTIMAL:
+                print('removing con {} fixed INFEASIBLITY'.format(con_index))
+                break
+
     solutions['BASERUN'] = base_prob.vars
     dispatches['BASERUN'] = gen_outputs(solutions['BASERUN'], bid_bounds, names)
     inter_flows['BASERUN'] = gen_outputs(solutions['BASERUN'], inter_bounds, names)
