@@ -1,317 +1,152 @@
-import pulp
 import pandas as pd
-from shutil import copyfile
-from joblib import delayed
-import os
-import subprocess
 import numpy as np
-import re
 from mip import Model, xsum, minimize, INTEGER, OptimizationStatus
+from time import time
 
 
-def solve_lp(number_of_variables, number_of_constraints, bid_bounds, inter_bounds,
-             constraint_matrix, objective_coefficients, row_rhs_values, names, inequality_types,
-             inter_penalty_factors, indices, region_req_by_row, mnsp_link_indexes, market_cap_and_floor,
-             inter_seg_dispatch_order_constraints, mnsp_region_requirement_coefficients, regions_to_price):
-    # --- Start Linear Program Definitions
-    # prob = pulp.LpProblem("energymarket", pulp.LpMinimize)
+def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficients,
+             rhs_and_inequality_types, region_req_by_row, regions_to_price):
+
+    # Create the mip object.
     prob = Model("energymarket")
-    name_index_to_row_index = {}
-    mcp = market_cap_and_floor['VOLL'][0]
-    # Create the set of market variables.
-    #variables = pulp.LpVariable.dicts("Variables", list(range(self.number_of_variables)))
-    #self.variables = dict((v.name, k) for k, v in variables.items())
-    # Set the properties of the market variables associated with the generators.
+
+    # Create the set of variables that define generator energy and FCAS dispatch.
     variables = {}
-    for upper_bound, index, band_type in zip(list(bid_bounds[names.col_bid_value]),
-                                             list(bid_bounds[names.col_variable_index]),
-                                             list(bid_bounds[names.col_capacity_band_number])):
-        # Set the upper bound of the variables, note the lower bound is always zero.
-        #variables[int(index)].bounds(0, upper_bound)
-        # The variables used to model the FCAS no FCAS decision are set to type integer. Note technically they
-        # are binary decision variables, but this is achieved through a type of integer and an upper bound of 1.
-        if (band_type == names.col_fcas_integer_variable) | (band_type == 'INTERTRIGGERVAR'):
-            #variables[int(index)].cat = 'Integer'
+    for upper_bound, index, band_type in zip(list(bid_bounds['BID']), list(bid_bounds['INDEX']),
+                                             list(bid_bounds['CAPACITYBAND'])):
+        if (band_type == 'FCASINTEGER') | (band_type == 'INTERTRIGGERVAR'):
             variables[index] = prob.add_var(lb=0, ub=upper_bound, var_type=INTEGER, name=str(index))
         else:
             variables[index] = prob.add_var(lb=0, ub=upper_bound, name=str(index))
 
-    # Set the properties of the market variables associated with the interconnectors.
-    for index, upper_bound in zip(list(inter_bounds[names.col_variable_index]),
-                                  list(inter_bounds[names.col_upper_bound])):
-        #variables[int(index)].bounds(0, upper_bound)
+    # Create set of variables that define interconnector flow.
+    for index, upper_bound in zip(list(inter_bounds['INDEX']), list(inter_bounds['UPPERBOUND'])):
         variables[index] = prob.add_var(lb=0, ub=upper_bound, name=str(index))
 
-    inter_trigger_vars = inter_seg_dispatch_order_constraints[inter_seg_dispatch_order_constraints['CAPACITYBAND']=='INTERTRIGGERVAR'].drop_duplicates(subset='INDEX')
-    for index, upper_bound in zip(list(inter_trigger_vars[names.col_variable_index]),
-                                  list(inter_trigger_vars[names.col_upper_bound])):
-        #variables[int(index)].bounds(0, upper_bound)
-        if index in variables.keys():
-            x = 1
-   #     if np.isnan(upper_bound):
-    #        variables[index] = prob.add_var(lb=0, ub=1, var_type=INTEGER)
-    #    else:
-    #        variables[index] = prob.add_var(lb=0, ub=upper_bound)
-
-
-
-    # Add the variables to the linear problem.
-    #prob.addVariables(list(variables.values()))
     # Define objective function
-    prob.objective = minimize(xsum(objective_coefficients[i] * variables[i] for i in
-                                   list(bid_bounds[names.col_variable_index]) +
-                                   list(inter_bounds[names.col_variable_index])))
-    # Create a list of the indexes of constraints to which penalty factors apply.
-    penalty_factor_indexes = inter_penalty_factors['ROWINDEX'].tolist()
-    var_indexes = range(number_of_variables)
-    constraint_matrix = constraint_matrix
-    row_rhs_values = row_rhs_values
-    inequality_types = inequality_types
+    tx = time()
+    objective_coefficients = objective_coefficients.set_index('INDEX')
+    print('time to set obj index {}'.format(time() - tx))
+    prob.objective = minimize(xsum(objective_coefficients['BID'][i] * variables[i] for i in list(bid_bounds['INDEX'])))
+
     # Create a numpy array of the market variables and constraint matrix rows, this improves the efficiency of
     # adding constraints to the linear problem.
-    np_gen_vars = np.asarray(list(variables.values()))
-    np_constraint_matrix = np.asarray(constraint_matrix)
-    gen_var_values = list(variables.values())
+    #np_gen_vars = np.asarray(list(variables.values()))
 
+    #vars in dict
     # Add the market constraints to the linear problem.
-    for i in range(number_of_constraints):
+    tx = time()
+    vars = pd.DataFrame(list(variables.items()), columns=['INDEX', 'VARS'])
+    combined_constraints = pd.merge(combined_constraints, vars, "left", on='INDEX')
+    combined_constraints['LHSCOEFFICIENTSVARS'] = combined_constraints['LHSCOEFFICIENTS'] * combined_constraints['VARS']
+    #combined_constraints['LHSCOEFFICIENTSVARS'] = combined_constraints.groupby('ROWINDEX', as_index=False)['LHSCOEFFICIENTSVARS'].agg(xsum)
+    print('time to set combined_constraints index {}'.format(time() - tx))
+    tx = time()
+    rhs = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['RHSCONSTANT']))
+    enq_type = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['ENQUALITYTYPE']))
+    print('time to set rhs_and_inequality_types index {}'.format(time() - tx))
+    number = 0
+    map = {}
+    tx = time()
+    tx1 = 0
+    tx2 = 0
+    combined_constraints = combined_constraints.set_index('ROWINDEX')
+    row_groups = combined_constraints.loc[:, ['LHSCOEFFICIENTSVARS']].groupby('ROWINDEX')
+    con = []
+    name = []
+    for i, row_group in row_groups:
         # Record the mapping between the index used to name a constraint internally to the pulp code and the row
         # index it is given in nemlite. This mapping allows constraints to be identified by the nemlite index and
         # modified later.
-        name_index_to_row_index[indices[i]] = i
-        # If a constraint uses a penalty factor it needs to be added to the problem in a specific way.
-        #if self.indices[i] in penalty_factor_indexes:
-            # Select the indexes of the variables used in the constraint.
-            #indx = np.nonzero(np_constraint_matrix[i])
-            # Select the names of the variables used in the constraint.
-            #gen_var_values = np_gen_vars[indx].tolist()
-            # Select the the coefficients of the variables used in the constraint.
-            #cm = np_constraint_matrix[i][indx].tolist()
-            # Create an object representing the left hand side of the constraint.
-            #lhs = pulp.LpAffineExpression(zip(gen_var_values, cm))
-            # Add the constraint based on its inequality type.
-            #if inequality_types[i] == 'equal_or_less':
-            #     constraint = pulp.LpConstraint(lhs, pulp.LpConstraintLE, rhs=row_rhs_values[i], name='{}'.format(i))
-            #elif inequality_types[i] == 'equal_or_greater':
-             #   constraint = pulp.LpConstraint(lhs, pulp.LpConstraintGE, rhs=row_rhs_values[i], name='{}'.format(i))
-            #elif inequality_types[i] == 'equal':
-            #    constraint = pulp.LpConstraint(lhs, pulp.LpConstraintEQ, rhs=row_rhs_values[i], name='{}'.format(i))
-           # else:
-           #     print('missing types')
-            # Calculate the penalty associated with the constraint.
-            #penalty = self.penalty_factors[self.penalty_factors['ROWINDEX'] == self.indices[i]][
-            #              'CONSTRAINTWEIGHT'].reset_index(drop=True).loc[0] * self.mcp
-            # Convert the constraint to elastic so it can be broken at the cost of the penalty.
-            #constraint = constraint.makeElasticSubProblem(penalty=penalty, proportionFreeBound=0)
-            #extend_3(prob, constraint)
-
-        #else:
-            # If no penalty factors are associated with the constraint add the constraint with optimised procedure
-            # implemented below.
-            # Select the indexes of the variables used in the constraint.
-        indx = np.nonzero(np_constraint_matrix[i])
-        # Multiply the variables and the coefficients to form the lhs. Use numpy arrays for efficiency.
-        v = np_constraint_matrix[i][indx] * np_gen_vars[indx]
-        # Convert back to list for adding to problem.
-        v = v.tolist()
-        # Add based on inequality type.
-        if inequality_types[i] == 'equal_or_less':
-            prob.add_constr(xsum(v) <= row_rhs_values[i], name=str(indices[i]))
-        elif inequality_types[i] == 'equal_or_greater':
-            prob.add_constr(xsum(v) >= row_rhs_values[i], name=str(indices[i]))
-        elif inequality_types[i] == 'equal':
-            prob.add_constr(xsum(v) == row_rhs_values[i], name=str(indices[i]))
-        else:
-            print('missing types')
-
-    solutions = {}
+        b = time()
+        exp = xsum(row_group['LHSCOEFFICIENTSVARS'])
+        tx1 += time() - b
+        b = time()
+        new_constraint = make_constraint(exp, rhs[i], enq_type[i], marginal_offset=0)
+        tx2 += time() - b
+        prob.add_constr(new_constraint, name=str(i))
+        map[i] = number
+        number += 1
+    print('time to xsum {}'.format(tx1))
+    print('time to set add_constr make {}'.format(tx2))
+    print('time to set add_constr all  {}'.format(time() - tx))
+    # Dicts to store results on a run basis, a base run, and pricing run for each region.
     dispatches = {}
     inter_flows = {}
+
+    # Copy initial problem so subsequent runs can use it.
     base_prob = prob.copy()
+
+    # Solve for the base case.
     status = base_prob.optimize()
+    # Check of a solution has been found.
     if status != OptimizationStatus.OPTIMAL:
-        print('{} problem'.format(status.name))
-        for con in base_prob.constrs:
-            con_index = con.name
-            print('removing con {}'.format(con.name))
-            base_prob.remove(con)
-            status = base_prob.optimize()
-            if status == OptimizationStatus.OPTIMAL:
-                print('removing con {} fixed INFEASIBLITY'.format(con_index))
-                break
+        # Attempt find constraint causing infeasibility.
+        con_index = find_problem_constraint(base_prob)
+        print('Couldn\'t find an optimal solution, but removing con {} fixed INFEASIBLITY'.format(con_index))
 
-    solutions['BASERUN'] = base_prob.vars
-    dispatches['BASERUN'] = gen_outputs(solutions['BASERUN'], bid_bounds, names)
-    inter_flows['BASERUN'] = gen_outputs(solutions['BASERUN'], inter_bounds, names)
+    # Save base case results
+    dispatches['BASERUN'] = gen_outputs(base_prob.vars, bid_bounds)
+    inter_flows['BASERUN'] = gen_outputs(base_prob.vars, inter_bounds)
+
+    # Perform pricing runs for each region.
     for region in regions_to_price:
-        #prob_marginal = add_marginal_load(prob, region, 'ENERGY', region_req_by_row, name_index_to_row_index,
-        #                                  v, row_rhs_values, indices)
         prob_marginal = prob.copy()
-        row_index = region_req_by_row[(region_req_by_row['REGIONID'] == region) &
-                                      (region_req_by_row['BIDTYPE'] == 'ENERGY')]['ROWINDEX'].values[0]
-        constraint = prob_marginal.constrs[name_index_to_row_index[row_index]]
+        row_index = get_region_load_constraint_index(region_req_by_row, region)
+        constraint = prob_marginal.constrs[map[row_index]]
         prob_marginal.remove(constraint)
-        i = name_index_to_row_index[row_index]
-        indx = np.nonzero(np_constraint_matrix[i])
-        # Multiply the variables and the coefficients to form the lhs. Use numpy arrays for efficiency.
-        v = np_constraint_matrix[i][indx] * np_gen_vars[indx]
-        # Convert back to list for adding to problem.
-        v = v.tolist()
-        # Add based on inequality type.
-        if inequality_types[i] == 'equal_or_less':
-            prob_marginal.add_constr(xsum(v) <= row_rhs_values[i] + 1, name=str(indices[i]))
-        elif inequality_types[i] == 'equal_or_greater':
-            prob_marginal.add_constr(xsum(v) >= row_rhs_values[i] + 1, name=str(indices[i]))
-        elif inequality_types[i] == 'equal':
-            prob_marginal.add_constr(xsum(v) == row_rhs_values[i] + 1, name=str(indices[i]))
-        else:
-            print('missing types')
+        row_group = combined_constraints[combined_constraints['ROWINDEX'] == row_index]
+        new_constraint = make_constraint(row_group, rhs[row_index], enq_type[row_index], marginal_offset=1)
+        prob_marginal.add_constr(new_constraint, name=str(row_index))
         prob_marginal.optimize()
-        solutions[region] = prob_marginal.vars
-        dispatches[region] = gen_outputs(solutions[region], bid_bounds, names)
-        inter_flows[region] = gen_outputs(solutions[region], inter_bounds, names)
-
+        dispatches[region] = gen_outputs(prob_marginal.vars, bid_bounds)
+        inter_flows[region] = gen_outputs(prob_marginal.vars, inter_bounds)
     return dispatches, inter_flows
 
 
-def add_marginal_load(prob, region, bidtype, region_req_by_row, name_index_to_row_index, v, row_rhs_values, indices):
-    prob = prob.copy()
-    # Add the marginal load of the region and bid type given. This is done modifying the constraint that forces
-    # a regions load to be met.
-    # Find the nemlite level index of the region and bid type.
-    row_index = region_req_by_row[(region_req_by_row['REGIONID'] == region) &
-                                  (region_req_by_row['BIDTYPE'] == bidtype)]['ROWINDEX'].values[0]
-    # Modify the constraint to its original value minus 1. Minus 1 is used at the load constraint is defined as a
-    # negative value.
-    constraint = prob.constrs[name_index_to_row_index[row_index]]
-    prob.remove(constraint)
-
-
-
-    #self.prob.constraints['_C' + str(name_i)].constant = self.prob.constraints['_C' + str(name_i)].constant - 1
-    return None
-
-
-def remove_marginal_load(prob, region, bidtype):
-    # Remove the marginal load of the region and bid type given. This is done modifying the constraint that forces
-    # a regions load to be met.
-    # Find the nemlite level index of the region and bid type.
-    row_index = prob.region_req_by_row[(prob.region_req_by_row['REGIONID'] == region) &
-                                       (prob.region_req_by_row['BIDTYPE'] == bidtype)]['ROWINDEX'].values[0]
-    name_i = prob.name_index_to_row_index[row_index]
-    # Return the constraint to its original value before the marginal load was added.
-    prob.prob.constraints['_C' + str(name_i)].constant = prob.prob.constraints['_C' + str(name_i)].constant + 1
-    return
-
-
-def extend_3(self, other, use_objective=True):
-    """
-    extends an LpProblem by adding constraints either from a dictionary
-    a tuple or another LpProblem object.
-
-    @param use_objective: determines whether the objective is imported from
-    the other problem
-
-    For dictionaries the constraints will be named with the keys
-    For tuples an unique name will be generated
-    For LpProblems the name of the problem will be added to the constraints
-    name
-    """
-    if isinstance(other, dict):
-        for name in other:
-            self.constraints[name] = other[name]
-    elif isinstance(other, pulp.LpProblem):
-        for v in other.variables()[-3:]:
-            v.name = other.name + v.name
-        for name, c in other.constraints.items():
-            c.name = other.name + name
-            self.addConstraint(c)
-        if use_objective:
-            self.objective += other.objective
+def make_constraint(exp, rhs, enq_type, marginal_offset=0):
+    # Multiply the variables and the coefficients to form the lhs.
+    # Add based on inequality type.
+    if enq_type == 'equal_or_less':
+        con = exp <= rhs + marginal_offset
+    elif enq_type == 'equal_or_greater':
+        con = exp >= rhs + marginal_offset
+    elif enq_type == 'equal':
+        con = exp == rhs + marginal_offset
     else:
-        for c in other:
-            if isinstance(c, tuple):
-                name = c[0]
-                c = c[1]
-            else:
-                name = None
-            if not name: name = c.name
-            if not name: name = self.unusedConstraintName()
-            self.constraints[name] = c
+        print('missing types')
+    return con
 
 
-def run_solves(base_prob, var_definitions, inter_definitions, ns, regions_to_price, pool,
-               region_req_by_row, name_index_to_row_index):
-    # Run the solves required to price given regions. This always includes a base solves and then one additional
-    # solve for each region to be priced.
-    base_prob.prob.optimize()
-
-    return None
-
-
-def regional_load_constraint_name(region_req_by_row, region, bidtype, name_index_to_row_index, constraints):
+def get_region_load_constraint_index(region_req_by_row, region):
     row_index = region_req_by_row[(region_req_by_row['REGIONID'] == region) &
-                                  (region_req_by_row['BIDTYPE'] == bidtype)]['ROWINDEX'].values[0]
-    # Map the nemlite level index to the index used in the pulp object.
-    name_i = name_index_to_row_index[row_index]
-    name = '_C' + str(name_i)
-    load = constraints['_C' + str(name_i)].constant
-    return name, load
+                                  (region_req_by_row['BIDTYPE'] == 'ENERGY')]['ROWINDEX'].values[0]
+    return row_index
 
 
-def run_par(region):
-    cmd = 'cbc.exe {}-pulp.mps branch printingOptions all solution {}-pulp.sol '.format(region, region)
-    pipe = open(os.devnull, 'w')
-    cbc = subprocess.Popen((cmd).split(), stdout=pipe, stderr=pipe)
-    if cbc.wait() != 0:
-        raise ("Pulp: Error while trying to execute ")
-    return
+def find_problem_constraint(base_prob):
+    for con in base_prob.constrs:
+        con_index = con.name
+        base_prob.remove(con)
+        status = base_prob.optimize()
+        if status == OptimizationStatus.OPTIMAL:
+            break
+    return con_index
 
 
-def gen_outputs(solution, var_definitions, ns):
+def gen_outputs(solution, var_definitions):
     # Create a data frame that outlines the solution values of the market variables given to the function.
     summary = pd.DataFrame()
     index = []
     dispatched = []
-    name = []
 
     for variable in solution:
-        # Skip dummy variables that do not correspond to and actual market variable.
-        if (variable.name == "__dummy") | ('elastic' in variable.name):
-            continue
-        # Process the variables name to retrive its index value.
         index.append(int(variable.name))
-        # Set the variables solution value as the dispatch value.
         dispatched.append(variable.x)
-        # Record the variables name.
-        name.append(variable.name)
 
     # Construct the data frame.
-    summary[ns.col_variable_index] = index
+    summary['INDEX'] = index
     summary['DISPATCHED'] = dispatched
-    summary['NAME'] = name
-    dispatch = pd.merge(var_definitions, summary, 'inner', on=[ns.col_variable_index])
+    dispatch = pd.merge(var_definitions, summary, 'inner', on=['INDEX'])
     return dispatch
 
-
-def gen_outputs_new(values, var_definitions, ns, variables_name_2_index):
-    # Create a data frame that outlines the solution values of the market variables given to the function.
-    summary = pd.DataFrame()
-    indexes = []
-    dispatched = []
-    name = []
-
-    for name, index in variables_name_2_index.items():
-        # Process the variables name to retrive its index value.
-        indexes.append(index)
-        # Set the variables solution value as the dispatch value.
-        dispatched.append(values[name].x)
-        # Record the variables name.
-        # name.append(variable.name)
-
-    # Construct the data frame.
-    summary[ns.col_variable_index] = indexes
-    summary['DISPATCHED'] = dispatched
-    # summary['NAME'] = name
-    dispatch = pd.merge(var_definitions, summary, 'inner', on=[ns.col_variable_index])
-    return dispatch
