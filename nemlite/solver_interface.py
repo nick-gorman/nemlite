@@ -38,10 +38,14 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
     tx = time()
     vars = pd.DataFrame(list(variables.items()), columns=['INDEX', 'VARS'])
     combined_constraints = pd.merge(combined_constraints, vars, "left", on='INDEX')
+    print('time to set merge index {}'.format(time() - tx))
+    tx = time()
     combined_constraints['LHSCOEFFICIENTSVARS'] = combined_constraints['LHSCOEFFICIENTS'] * combined_constraints['VARS']
     #combined_constraints['LHSCOEFFICIENTSVARS'] = combined_constraints.groupby('ROWINDEX', as_index=False)['LHSCOEFFICIENTSVARS'].agg(xsum)
-    print('time to set combined_constraints index {}'.format(time() - tx))
+    combined_constraints = combined_constraints.set_index('ROWINDEX')
+    print('time to set multiply index {}'.format(time() - tx))
     tx = time()
+    constraint_dict = {g: s.tolist() for g, s in combined_constraints['LHSCOEFFICIENTSVARS'].groupby('ROWINDEX')}
     rhs = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['RHSCONSTANT']))
     enq_type = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['ENQUALITYTYPE']))
     print('time to set rhs_and_inequality_types index {}'.format(time() - tx))
@@ -50,22 +54,21 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
     tx = time()
     tx1 = 0
     tx2 = 0
-    combined_constraints = combined_constraints.set_index('ROWINDEX')
-    row_groups = combined_constraints.loc[:, ['LHSCOEFFICIENTSVARS']].groupby('ROWINDEX')
+    #row_groups = combined_constraints.loc[:, ['LHSCOEFFICIENTSVARS']].groupby('ROWINDEX')
     con = []
     name = []
-    for i, row_group in row_groups:
+    for row_index, row in constraint_dict.items():
         # Record the mapping between the index used to name a constraint internally to the pulp code and the row
         # index it is given in nemlite. This mapping allows constraints to be identified by the nemlite index and
         # modified later.
         b = time()
-        exp = xsum(row_group['LHSCOEFFICIENTSVARS'])
+        exp = xsum(row)
         tx1 += time() - b
         b = time()
-        new_constraint = make_constraint(exp, rhs[i], enq_type[i], marginal_offset=0)
+        new_constraint = make_constraint(exp, rhs[row_index], enq_type[row_index], marginal_offset=0)
+        prob.add_constr(new_constraint, name=str(row_index))
         tx2 += time() - b
-        prob.add_constr(new_constraint, name=str(i))
-        map[i] = number
+        map[row_index] = number
         number += 1
     print('time to xsum {}'.format(tx1))
     print('time to set add_constr make {}'.format(tx2))
