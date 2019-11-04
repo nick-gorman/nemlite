@@ -63,6 +63,11 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
     dispatches = {}
     inter_flows = {}
 
+    bid_bounds['VARS'] = [variables[i] for i in bid_bounds['MIPINDEX']]
+    bid_bounds['NAMECHECK'] = bid_bounds['VARS'].apply(lambda x: x.name)
+    inter_bounds['VARS'] = [variables[i] for i in inter_bounds['MIPINDEX']]
+    inter_bounds['NAMECHECK'] = inter_bounds['VARS'].apply(lambda x: x.name)
+
     # Copy initial problem so subsequent runs can use it.
     tx3 = 0
     bc = time()
@@ -84,9 +89,11 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
 
     # Save base case results
     bc = time()
-
-    dispatches['BASERUN'] = gen_outputs(base_prob.vars, bid_bounds)
-    inter_flows['BASERUN'] = gen_outputs(base_prob.vars, inter_bounds)
+    bid_bounds['DISPATCHED'] = bid_bounds['VARS'].apply(lambda x: x.x)
+    inter_bounds['DISPATCHED'] = inter_bounds['VARS'].apply(lambda x: x.x)
+    dispatches['BASERUN'] = bid_bounds.loc[:, ['DUID', 'BIDTYPE', 'CAPACITYBAND', 'INDEX', 'PRICE', 'DISPATCHED', 'BID']]
+    inter_flows['BASERUN'] = inter_bounds.loc[:, ['INTERCONNECTORID', 'DIRECTION', 'REGIONID', 'BIDTYPE', 'LOSSSEGMENT',
+                                                  'MWBREAKPOINT', 'INDEX', 'UPPERBOUND', 'DISPATCHED']]
     tx1 += time() - bc
     print('############# BASE')
     # Perform pricing runs for each region.
@@ -111,8 +118,11 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
         prob_marginal.optimize()
         tx += time() - bc
         bc = time()
-        dispatches[region] = gen_outputs(prob_marginal.vars, bid_bounds)
-        inter_flows[region] = gen_outputs(prob_marginal.vars, inter_bounds)
+        bid_bounds['DISPATCHED'] = bid_bounds['VARS'].apply(lambda x: x.x)
+        inter_bounds['DISPATCHED'] = inter_bounds['VARS'].apply(lambda x: x.x)
+        dispatches[region] = bid_bounds.loc[:, ['DUID', 'BIDTYPE', 'CAPACITYBAND', 'INDEX', 'PRICE', 'DISPATCHED', 'BID']]
+        inter_flows[region] = inter_bounds.loc[:, ['INTERCONNECTORID', 'DIRECTION', 'REGIONID', 'BIDTYPE',
+                                                   'LOSSSEGMENT', 'MWBREAKPOINT', 'INDEX', 'UPPERBOUND', 'DISPATCHED']]
         tx1 += time() - bc
         #old_constraint.expr.add_const(rhs[row_index])
         new_constraint_index = get_con_by_name(prob_marginal.constrs, 'blah')
@@ -172,13 +182,15 @@ def find_problem_constraint(base_prob):
     return con_index
 
 
-def gen_outputs2(prob_vars, var_definitions):
+def gen_outputs(prob_vars, var_definitions):
+    var_definitions = var_definitions.copy()
     var_definitions['DISPATCHED'] = [prob_vars[i] for i in var_definitions['MIPINDEX']]
+    var_definitions['NAMECHECK'] = var_definitions['DISPATCHED'].apply(lambda x: x.name)
     var_definitions['DISPATCHED'] = var_definitions['DISPATCHED'].apply(lambda x: x.x)
     return var_definitions
 
 
-def gen_outputs(solution, var_definitions):
+def gen_output2(solution, var_definitions):
     # Create a data frame that outlines the solution values of the market variables given to the function.
     summary = pd.DataFrame()
     index = []
