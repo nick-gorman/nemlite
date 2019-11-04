@@ -50,8 +50,8 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
     tx = time()
     tx1 = 0
     tx2 = 0
-    combined_constraints = combined_constraints.set_index('ROWINDEX')
-    row_groups = combined_constraints.loc[:, ['LHSCOEFFICIENTSVARS']].groupby('ROWINDEX')
+    #combined_constraints = combined_constraints.set_index('ROWINDEX')
+    #row_groups = combined_constraints.loc[:, ['ROWINDEX', 'LHSCOEFFICIENTSVARS']].groupby('ROWINDEX')
     con = []
     name = []
     for i, row_group in row_groups:
@@ -59,10 +59,10 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
         # index it is given in nemlite. This mapping allows constraints to be identified by the nemlite index and
         # modified later.
         b = time()
-        exp = xsum(row_group['LHSCOEFFICIENTSVARS'])
+        #exp = xsum(row_group['LHSCOEFFICIENTSVARS'])
         tx1 += time() - b
         b = time()
-        new_constraint = make_constraint(exp, rhs[i], enq_type[i], marginal_offset=0)
+        new_constraint = make_constraint(row_group['LHSCOEFFICIENTSVARS'], rhs[i], enq_type[i], marginal_offset=0)
         tx2 += time() - b
         prob.add_constr(new_constraint, name=str(i))
         map[i] = number
@@ -96,7 +96,7 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
         constraint = prob_marginal.constrs[map[row_index]]
         prob_marginal.remove(constraint)
         row_group = combined_constraints[combined_constraints['ROWINDEX'] == row_index]
-        new_constraint = make_constraint(row_group, rhs[row_index], enq_type[row_index], marginal_offset=1)
+        new_constraint = make_constraint(row_group['LHSCOEFFICIENTSVARS'], rhs[row_index], enq_type[row_index], marginal_offset=1)
         prob_marginal.add_constr(new_constraint, name=str(row_index))
         prob_marginal.optimize()
         dispatches[region] = gen_outputs(prob_marginal.vars, bid_bounds)
@@ -106,6 +106,7 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
 
 def make_constraint(exp, rhs, enq_type, marginal_offset=0):
     # Multiply the variables and the coefficients to form the lhs.
+    exp = xsum(exp)
     # Add based on inequality type.
     if enq_type == 'equal_or_less':
         con = exp <= rhs + marginal_offset
