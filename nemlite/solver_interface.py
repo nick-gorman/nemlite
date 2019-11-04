@@ -59,7 +59,7 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
         new_constraint = make_constraint(var_list, constraint_matrix[i], rhs[row_indices[i]], enq_type[row_indices[i]],
                                          marginal_offset=0)
         prob.add_constr(new_constraint, name=str(i))
-        
+
     # Dicts to store results on a run basis, a base run, and pricing run for each region.
     dispatches = {}
     inter_flows = {}
@@ -72,7 +72,7 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
     # Copy initial problem so subsequent runs can use it.
     tx3 = 0
     bc = time()
-    base_prob = prob#.copy()
+    base_prob = prob
     tx3 += time() - bc
     tx = 0
     tx1 = 0
@@ -90,17 +90,16 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
 
     # Save base case results
     bc = time()
-    bid_bounds['DISPATCHED'] = bid_bounds['VARS'].apply(lambda x: x.x)
-    inter_bounds['DISPATCHED'] = inter_bounds['VARS'].apply(lambda x: x.x)
-    dispatches['BASERUN'] = bid_bounds.loc[:, ['DUID', 'BIDTYPE', 'CAPACITYBAND', 'INDEX', 'PRICE', 'DISPATCHED', 'BID']]
-    inter_flows['BASERUN'] = inter_bounds.loc[:, ['INTERCONNECTORID', 'DIRECTION', 'REGIONID', 'BIDTYPE', 'LOSSSEGMENT',
-                                                  'MWBREAKPOINT', 'INDEX', 'UPPERBOUND', 'DISPATCHED']]
+    bid_bounds = outputs(bid_bounds)
+    inter_bounds = outputs(inter_bounds)
+    dispatches['BASERUN'] = strip_gen_outputs_to_minimal(bid_bounds)
+    inter_flows['BASERUN'] = strip_inter_outputs_to_minimal(inter_bounds)
     tx1 += time() - bc
     print('############# BASE')
     # Perform pricing runs for each region.
     for region in regions_to_price:
         bc = time()
-        prob_marginal = prob#.copy()
+        prob_marginal = prob
         tx3 += time() - bc
         bc = time()
         row_index = get_region_load_constraint_index(region_req_by_row, region)
@@ -111,21 +110,17 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
         new_constraint = make_constraint(var_list, constraint_matrix[mip_row_index], rhs[row_index],
                                          enq_type[row_index], marginal_offset=1)
         prob_marginal.add_constr(new_constraint, name='blah')
-        #old_constraint.expr.add_const(-1 * rhs[row_index])
-        #old_constraint.expr.add_const(rhs[row_index] + 1)
         tx2 += time() - bc
         bc = time()
         print('####### GO')
         prob_marginal.optimize()
         tx += time() - bc
         bc = time()
-        bid_bounds['DISPATCHED'] = bid_bounds['VARS'].apply(lambda x: x.x)
-        inter_bounds['DISPATCHED'] = inter_bounds['VARS'].apply(lambda x: x.x)
-        dispatches[region] = bid_bounds.loc[:, ['DUID', 'BIDTYPE', 'CAPACITYBAND', 'INDEX', 'PRICE', 'DISPATCHED', 'BID']]
-        inter_flows[region] = inter_bounds.loc[:, ['INTERCONNECTORID', 'DIRECTION', 'REGIONID', 'BIDTYPE',
-                                                   'LOSSSEGMENT', 'MWBREAKPOINT', 'INDEX', 'UPPERBOUND', 'DISPATCHED']]
+        bid_bounds = outputs(bid_bounds)
+        inter_bounds = outputs(inter_bounds)
+        dispatches[region] = strip_gen_outputs_to_minimal(bid_bounds)
+        inter_flows[region] = strip_inter_outputs_to_minimal(inter_bounds)
         tx1 += time() - bc
-        #old_constraint.expr.add_const(rhs[row_index])
         new_constraint_index = get_con_by_name(prob_marginal.constrs, 'blah')
         new_constraint = prob_marginal.constrs[new_constraint_index]
         prob_marginal.remove(new_constraint)
@@ -167,6 +162,7 @@ def make_constraint(var_list, lhs, rhs, enq_type, marginal_offset=0):
         print('missing types')
     return con
 
+
 def get_region_load_constraint_index(region_req_by_row, region):
     row_index = region_req_by_row[(region_req_by_row['REGIONID'] == region) &
                                   (region_req_by_row['BIDTYPE'] == 'ENERGY')]['ROWINDEX'].values[0]
@@ -183,31 +179,19 @@ def find_problem_constraint(base_prob):
     return con_index
 
 
-def gen_outputs(prob_vars, var_definitions):
-    var_definitions = var_definitions.copy()
-    var_definitions['DISPATCHED'] = [prob_vars[i] for i in var_definitions['MIPINDEX']]
-    var_definitions['NAMECHECK'] = var_definitions['DISPATCHED'].apply(lambda x: x.name)
-    var_definitions['DISPATCHED'] = var_definitions['DISPATCHED'].apply(lambda x: x.x)
+def outputs(var_definitions):
+    var_definitions['DISPATCHED'] = var_definitions['VARS'].apply(lambda x: x.x)
     return var_definitions
 
 
-def gen_output2(solution, var_definitions):
-    # Create a data frame that outlines the solution values of the market variables given to the function.
-    summary = pd.DataFrame()
-    index = []
-    dispatched = []
-
-    for variable in solution:
-        index.append(int(variable.name))
-        dispatched.append(variable.x)
-
-     # Construct the data frame.
-    summary['INDEX'] = index
-    summary['DISPATCHED'] = dispatched
-    dispatch = pd.merge(var_definitions, summary, 'inner', on=['INDEX'])
-    return dispatch
+def strip_gen_outputs_to_minimal(gen_outputs):
+    return gen_outputs.loc[:, ['DUID', 'BIDTYPE', 'CAPACITYBAND', 'INDEX', 'PRICE', 'DISPATCHED', 'BID']]
 
 
-def get_dispatch(index, prob):
-    return prob.var_by_name(str(index).x)
+def strip_inter_outputs_to_minimal(gen_outputs):
+    return gen_outputs.loc[:, ['INTERCONNECTORID', 'DIRECTION', 'REGIONID', 'BIDTYPE', 'LOSSSEGMENT',
+                                                  'MWBREAKPOINT', 'INDEX', 'UPPERBOUND', 'DISPATCHED']]
+
+
+
 
