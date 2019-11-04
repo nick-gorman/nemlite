@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from mip import Model, xsum, minimize, INTEGER, OptimizationStatus
+from mip import Model, xsum, minimize, INTEGER, OptimizationStatus, LinExpr
 from time import time
 
 
@@ -12,6 +12,9 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
 
     # Create the set of variables that define generator energy and FCAS dispatch.
     variables = {}
+    bid_bounds = bid_bounds.sort_values('INDEX')
+    bid_bounds = bid_bounds.reset_index()
+    bid_bounds['MIPINDEX'] = bid_bounds.index
     for upper_bound, index, band_type in zip(list(bid_bounds['BID']), list(bid_bounds['INDEX']),
                                              list(bid_bounds['CAPACITYBAND'])):
         if (band_type == 'FCASINTEGER') | (band_type == 'INTERTRIGGERVAR'):
@@ -20,68 +23,65 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
             variables[index] = prob.add_var(lb=0, ub=upper_bound, name=str(index))
 
     # Create set of variables that define interconnector flow.
+    inter_bounds = inter_bounds.sort_values('INDEX')
+    inter_bounds = inter_bounds.reset_index()
+    inter_bounds['MIPINDEX'] = inter_bounds.index
     for index, upper_bound in zip(list(inter_bounds['INDEX']), list(inter_bounds['UPPERBOUND'])):
         variables[index] = prob.add_var(lb=0, ub=upper_bound, name=str(index))
 
     # Define objective function
     tx = time()
+    objective_coefficients = objective_coefficients.sort_values('INDEX')
     objective_coefficients = objective_coefficients.set_index('INDEX')
     print('time to set obj index {}'.format(time() - tx))
     prob.objective = minimize(xsum(objective_coefficients['BID'][i] * variables[i] for i in list(bid_bounds['INDEX'])))
 
     # Create a numpy array of the market variables and constraint matrix rows, this improves the efficiency of
     # adding constraints to the linear problem.
-    #np_gen_vars = np.asarray(list(variables.values()))
-
-    #vars in dict
-    # Add the market constraints to the linear problem.
     tx = time()
-    vars = pd.DataFrame(list(variables.items()), columns=['INDEX', 'VARS'])
-    combined_constraints = pd.merge(combined_constraints, vars, "left", on='INDEX')
-    print('time to set merge index {}'.format(time() - tx))
-    tx = time()
-    combined_constraints['LHSCOEFFICIENTSVARS'] = combined_constraints['LHSCOEFFICIENTS'] * combined_constraints['VARS']
-    #combined_constraints['LHSCOEFFICIENTSVARS'] = combined_constraints.groupby('ROWINDEX', as_index=False)['LHSCOEFFICIENTSVARS'].agg(xsum)
-    combined_constraints = combined_constraints.set_index('ROWINDEX')
-    print('time to set multiply index {}'.format(time() - tx))
+    combined_constraints = combined_constraints.sort_values('ROWINDEX').reset_index()
+    constraint_matrix = combined_constraints.pivot('ROWINDEX', 'INDEX', 'LHSCOEFFICIENTS')
+    constraint_matrix = constraint_matrix.sort_index(axis=1)
+    row_indices = np.asarray(constraint_matrix.index)
+    var_indices = np.asarray(constraint_matrix.columns)
+    constraint_matrix = np.asarray(constraint_matrix)
+    print('time to set combined_constraints index {}'.format(time() - tx))
     tx = time()
     constraint_dict = {g: s.tolist() for g, s in combined_constraints['LHSCOEFFICIENTSVARS'].groupby('ROWINDEX')}
     rhs = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['RHSCONSTANT']))
     enq_type = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['ENQUALITYTYPE']))
     print('time to set rhs_and_inequality_types index {}'.format(time() - tx))
-    number = 0
-    map = {}
-    tx = time()
-    tx1 = 0
-    tx2 = 0
-    #row_groups = combined_constraints.loc[:, ['LHSCOEFFICIENTSVARS']].groupby('ROWINDEX')
-    con = []
-    name = []
-    for row_index, row in constraint_dict.items():
+    var_list = np.asarray([v for k, v in variables.items()])
+    for i in range(len(row_indices)):
         # Record the mapping between the index used to name a constraint internally to the pulp code and the row
         # index it is given in nemlite. This mapping allows constraints to be identified by the nemlite index and
         # modified later.
-        b = time()
-        exp = xsum(row)
-        tx1 += time() - b
-        b = time()
-        new_constraint = make_constraint(exp, rhs[row_index], enq_type[row_index], marginal_offset=0)
-        prob.add_constr(new_constraint, name=str(row_index))
-        tx2 += time() - b
-        map[row_index] = number
-        number += 1
-    print('time to xsum {}'.format(tx1))
-    print('time to set add_constr make {}'.format(tx2))
-    print('time to set add_constr all  {}'.format(time() - tx))
+        new_constraint = make_constraint(var_list, constraint_matrix[i], rhs[row_indices[i]], enq_type[row_indices[i]],
+                                         marginal_offset=0)
+        prob.add_constr(new_constraint, name=str(i))
+        
     # Dicts to store results on a run basis, a base run, and pricing run for each region.
     dispatches = {}
     inter_flows = {}
 
-    # Copy initial problem so subsequent runs can use it.
-    base_prob = prob.copy()
+    bid_bounds['VARS'] = [variables[i] for i in bid_bounds['MIPINDEX']]
+    bid_bounds['NAMECHECK'] = bid_bounds['VARS'].apply(lambda x: x.name)
+    inter_bounds['VARS'] = [variables[i] for i in inter_bounds['MIPINDEX']]
+    inter_bounds['NAMECHECK'] = inter_bounds['VARS'].apply(lambda x: x.name)
 
+    # Copy initial problem so subsequent runs can use it.
+    tx3 = 0
+    bc = time()
+    base_prob = prob#.copy()
+    tx3 += time() - bc
+    tx = 0
+    tx1 = 0
+    tx2 = 0
+    b = time()
     # Solve for the base case.
+    bc = time()
     status = base_prob.optimize()
+    tx += time() - bc
     # Check of a solution has been found.
     if status != OptimizationStatus.OPTIMAL:
         # Attempt find constraint causing infeasibility.
@@ -89,26 +89,73 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
         print('Couldn\'t find an optimal solution, but removing con {} fixed INFEASIBLITY'.format(con_index))
 
     # Save base case results
-    dispatches['BASERUN'] = gen_outputs(base_prob.vars, bid_bounds)
-    inter_flows['BASERUN'] = gen_outputs(base_prob.vars, inter_bounds)
-
+    bc = time()
+    bid_bounds['DISPATCHED'] = bid_bounds['VARS'].apply(lambda x: x.x)
+    inter_bounds['DISPATCHED'] = inter_bounds['VARS'].apply(lambda x: x.x)
+    dispatches['BASERUN'] = bid_bounds.loc[:, ['DUID', 'BIDTYPE', 'CAPACITYBAND', 'INDEX', 'PRICE', 'DISPATCHED', 'BID']]
+    inter_flows['BASERUN'] = inter_bounds.loc[:, ['INTERCONNECTORID', 'DIRECTION', 'REGIONID', 'BIDTYPE', 'LOSSSEGMENT',
+                                                  'MWBREAKPOINT', 'INDEX', 'UPPERBOUND', 'DISPATCHED']]
+    tx1 += time() - bc
+    print('############# BASE')
     # Perform pricing runs for each region.
     for region in regions_to_price:
-        prob_marginal = prob.copy()
+        bc = time()
+        prob_marginal = prob#.copy()
+        tx3 += time() - bc
+        bc = time()
         row_index = get_region_load_constraint_index(region_req_by_row, region)
-        constraint = prob_marginal.constrs[map[row_index]]
-        prob_marginal.remove(constraint)
-        row_group = combined_constraints[combined_constraints['ROWINDEX'] == row_index]
-        new_constraint = make_constraint(row_group, rhs[row_index], enq_type[row_index], marginal_offset=1)
-        prob_marginal.add_constr(new_constraint, name=str(row_index))
+        mip_row_index = np.argwhere(row_indices == row_index)[0][0]
+        old_constraint_index = get_con_by_name(prob_marginal.constrs, str(mip_row_index))
+        old_constraint = prob_marginal.constrs[old_constraint_index]
+        prob_marginal.remove(old_constraint)
+        new_constraint = make_constraint(var_list, constraint_matrix[mip_row_index], rhs[row_index],
+                                         enq_type[row_index], marginal_offset=1)
+        prob_marginal.add_constr(new_constraint, name='blah')
+        #old_constraint.expr.add_const(-1 * rhs[row_index])
+        #old_constraint.expr.add_const(rhs[row_index] + 1)
+        tx2 += time() - bc
+        bc = time()
+        print('####### GO')
         prob_marginal.optimize()
-        dispatches[region] = gen_outputs(prob_marginal.vars, bid_bounds)
-        inter_flows[region] = gen_outputs(prob_marginal.vars, inter_bounds)
+        tx += time() - bc
+        bc = time()
+        bid_bounds['DISPATCHED'] = bid_bounds['VARS'].apply(lambda x: x.x)
+        inter_bounds['DISPATCHED'] = inter_bounds['VARS'].apply(lambda x: x.x)
+        dispatches[region] = bid_bounds.loc[:, ['DUID', 'BIDTYPE', 'CAPACITYBAND', 'INDEX', 'PRICE', 'DISPATCHED', 'BID']]
+        inter_flows[region] = inter_bounds.loc[:, ['INTERCONNECTORID', 'DIRECTION', 'REGIONID', 'BIDTYPE',
+                                                   'LOSSSEGMENT', 'MWBREAKPOINT', 'INDEX', 'UPPERBOUND', 'DISPATCHED']]
+        tx1 += time() - bc
+        #old_constraint.expr.add_const(rhs[row_index])
+        new_constraint_index = get_con_by_name(prob_marginal.constrs, 'blah')
+        new_constraint = prob_marginal.constrs[new_constraint_index]
+        prob_marginal.remove(new_constraint)
+        old_constraint = make_constraint(var_list, constraint_matrix[mip_row_index], rhs[row_index],
+                                         enq_type[row_index], marginal_offset=0)
+        prob_marginal.add_constr(old_constraint, name=str(mip_row_index))
+        print('############# {}'.format(region))
+    print('time for copy {}'.format(tx3))
+    print('time for mod cons {}'.format(tx2))
+    print('time for solves {}'.format(tx))
+    print('time for output processing {}'.format(tx1))
+    print('time from first solve {}'.format(time()-b))
     return dispatches, inter_flows
 
 
-def make_constraint(exp, rhs, enq_type, marginal_offset=0):
-    # Multiply the variables and the coefficients to form the lhs.
+def get_con_by_name(constraints, name):
+    i = 0
+    for con in constraints:
+        if con.name == name:
+            return i
+        i += 1
+
+
+def make_constraint(var_list, lhs, rhs, enq_type, marginal_offset=0):
+    needed_varaiables_indices = np.argwhere(~np.isnan(lhs)).flatten()
+    lhs_varaiables = var_list[needed_varaiables_indices]
+    lhs = lhs[needed_varaiables_indices]
+    exp = lhs_varaiables * lhs
+    exp = exp.tolist()
+    exp = xsum(exp)
     # Add based on inequality type.
     if enq_type == 'equal_or_less':
         con = exp <= rhs + marginal_offset
@@ -119,7 +166,6 @@ def make_constraint(exp, rhs, enq_type, marginal_offset=0):
     else:
         print('missing types')
     return con
-
 
 def get_region_load_constraint_index(region_req_by_row, region):
     row_index = region_req_by_row[(region_req_by_row['REGIONID'] == region) &
@@ -137,7 +183,15 @@ def find_problem_constraint(base_prob):
     return con_index
 
 
-def gen_outputs(solution, var_definitions):
+def gen_outputs(prob_vars, var_definitions):
+    var_definitions = var_definitions.copy()
+    var_definitions['DISPATCHED'] = [prob_vars[i] for i in var_definitions['MIPINDEX']]
+    var_definitions['NAMECHECK'] = var_definitions['DISPATCHED'].apply(lambda x: x.name)
+    var_definitions['DISPATCHED'] = var_definitions['DISPATCHED'].apply(lambda x: x.x)
+    return var_definitions
+
+
+def gen_output2(solution, var_definitions):
     # Create a data frame that outlines the solution values of the market variables given to the function.
     summary = pd.DataFrame()
     index = []
@@ -147,9 +201,13 @@ def gen_outputs(solution, var_definitions):
         index.append(int(variable.name))
         dispatched.append(variable.x)
 
-    # Construct the data frame.
+     # Construct the data frame.
     summary['INDEX'] = index
     summary['DISPATCHED'] = dispatched
     dispatch = pd.merge(var_definitions, summary, 'inner', on=['INDEX'])
     return dispatch
+
+
+def get_dispatch(index, prob):
+    return prob.var_by_name(str(index).x)
 
