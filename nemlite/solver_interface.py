@@ -47,7 +47,7 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
     constraint_matrix = np.asarray(constraint_matrix)
     print('time to set combined_constraints index {}'.format(time() - tx))
     tx = time()
-    constraint_dict = {g: s.tolist() for g, s in combined_constraints['LHSCOEFFICIENTSVARS'].groupby('ROWINDEX')}
+    # constraint_dict = {g: s.tolist() for g, s in combined_constraints['LHSCOEFFICIENTSVARS'].groupby('ROWINDEX')}
     rhs = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['RHSCONSTANT']))
     enq_type = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['ENQUALITYTYPE']))
     print('time to set rhs_and_inequality_types index {}'.format(time() - tx))
