@@ -44,7 +44,6 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
     # constraint_dict = {g: s.tolist() for g, s in combined_constraints['LHSCOEFFICIENTSVARS'].groupby('ROWINDEX')}
     rhs = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['RHSCONSTANT']))
     enq_type = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['ENQUALITYTYPE']))
-    print('time to set rhs_and_inequality_types index {}'.format(time() - tx))
     var_list = np.asarray([v for k, v in variables.items()])
     for i in range(len(row_indices)):
         # Record the mapping between the index used to name a constraint internally to the pulp code and the row

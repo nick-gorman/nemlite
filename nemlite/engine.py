@@ -1606,6 +1606,7 @@ def price_regions(base_case_dispatch, pricing_dispatchs, gen_info_raw, results_p
 
 
 def create_joint_capacity_constraints(bids_and_indexes, capacity_bids, initial_conditions, max_con):
+    t0 = time()
     # Pre calculate at table that allows for the efficient selection of generators according to which markets they are
     # bidding into
     bid_type_check = bids_and_indexes.copy()
@@ -1637,7 +1638,7 @@ def create_joint_capacity_constraints(bids_and_indexes, capacity_bids, initial_c
         max_con = max_constraint_index(joint_constraints)
         combined_joint_capacity_constraints = pd.concat([combined_joint_capacity_constraints,
                                                          joint_constraints])
-
+    print('Total time in create_joint_capacity_constraints {}'.format(time()-t0))
     return combined_joint_capacity_constraints
 
 
@@ -1758,8 +1759,12 @@ def create_joint_ramping_constraints(bids_and_indexes, initial_conditions, max_c
 
     return constraint_variables
 
+from time import perf_counter
+import gc
 
 def joint_energy_and_reg_constraints(bids_and_indexes, capacity_bids, max_con, reg_service, bid_type_check):
+    ta = perf_counter()
+    t0 = perf_counter()
     units_with_reg_and_energy = bid_type_check[(bid_type_check[reg_service] == 1) & (bid_type_check['ENERGY'] == 1)]
     units_with_reg_and_energy = units_with_reg_and_energy.reset_index(drop=True)
 
@@ -1767,7 +1772,9 @@ def joint_energy_and_reg_constraints(bids_and_indexes, capacity_bids, max_con, r
                                        (bids_and_indexes['BIDTYPE'] == reg_service)]
 
     constraint_variables = applicable_bids[applicable_bids['DUID'].isin(list(units_with_reg_and_energy['DUID']))]
-
+    #constraint_variables = pd.merge(bids_and_indexes, units_with_reg_and_energy, 'left', on='DUID')
+    print('Set up {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
     slope_coefficients = capacity_bids[capacity_bids['BIDTYPE'] == reg_service].copy()
     slope_coefficients = slope_coefficients[slope_coefficients['BIDTYPE'] == reg_service]
     slope_coefficients['UPPERSLOPE'] = ((slope_coefficients['ENABLEMENTMAX'] - slope_coefficients['HIGHBREAKPOINT']) /
@@ -1777,7 +1784,8 @@ def joint_energy_and_reg_constraints(bids_and_indexes, capacity_bids, max_con, r
 
     slope_coefficients = \
         slope_coefficients.loc[:, ('DUID', 'UPPERSLOPE', 'LOWERSLOPE', 'ENABLEMENTMAX', 'ENABLEMENTMIN')]
-
+    print('Slope {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
     units_to_constraint_upper = pd.merge(constraint_variables, slope_coefficients, 'left', 'DUID')
     units_to_constraint_upper['LHSCOEFFICIENTS'] = np.where(units_to_constraint_upper['BIDTYPE'] == 'ENERGY', 1, 0)
     units_to_constraint_upper['LHSCOEFFICIENTS'] = np.where((units_to_constraint_upper['BIDTYPE'] == reg_service),
@@ -1785,7 +1793,14 @@ def joint_energy_and_reg_constraints(bids_and_indexes, capacity_bids, max_con, r
                                                             units_to_constraint_upper['LHSCOEFFICIENTS'])
     units_to_constraint_upper['RHSCONSTANT'] = units_to_constraint_upper['ENABLEMENTMAX']
     units_to_constraint_upper['CONSTRAINTTYPE'] = '<='
-    units_to_constraint_upper_rows = units_to_constraint_upper.groupby('DUID', as_index=False).first()
+    print('Upper 1 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
+    #units_to_constraint_upper_rows = units_to_constraint_upper.groupby('DUID', as_index=False).first()
+    #units_to_constraint_upper_rows = units_to_constraint_upper.drop_duplicates(subset='DUID')
+    unique_duids = units_to_constraint_upper['DUID'].unique()
+    units_to_constraint_upper_rows = dict(zip(unique_duids, np.arange(max_con + 1, max_con + 1 + len(unique_duids))))
+    print('Group 1 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
 
     units_to_constraint_lower = pd.merge(constraint_variables, slope_coefficients, 'left', 'DUID')
     units_to_constraint_lower['LHSCOEFFICIENTS'] = np.where(units_to_constraint_lower['BIDTYPE'] == 'ENERGY', 1, 0)
@@ -1795,22 +1810,31 @@ def joint_energy_and_reg_constraints(bids_and_indexes, capacity_bids, max_con, r
     units_to_constraint_lower['RHSCONSTANT'] = units_to_constraint_lower['ENABLEMENTMIN']
     units_to_constraint_lower['CONSTRAINTTYPE'] = '>='
     units_to_constraint_lower_rows = units_to_constraint_lower.groupby('DUID', as_index=False).first()
-
-    units_to_constraint_upper_rows = units_to_constraint_upper_rows.reset_index(drop=True)
-    units_to_constraint_upper_rows = save_index(units_to_constraint_upper_rows, 'ROWINDEX', max_con + 1)
-    units_to_constraint_upper_rows = units_to_constraint_upper_rows.loc[:, ('DUID', 'ROWINDEX')]
-    units_to_constraint_upper = pd.merge(units_to_constraint_upper, units_to_constraint_upper_rows, 'left', 'DUID')
-
+    print('Lower 1 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
+    #units_to_constraint_upper_rows = units_to_constraint_upper_rows.reset_index(drop=True)
+    #units_to_constraint_upper_rows = save_index(units_to_constraint_upper_rows, 'ROWINDEX', max_con + 1)
+    #units_to_constraint_upper_rows = units_to_constraint_upper_rows.loc[:, ('DUID', 'ROWINDEX')]
+    #units_to_constraint_upper.set_index('DUID', inplace=True)
+    #units_to_constraint_upper_rows.set_index('DUID', inplace=True)
+    #units_to_constraint_upper = units_to_constraint_upper.join(units_to_constraint_upper_rows, how='left')
+    #units_to_constraint_upper.reset_index(inplace=True)
+    units_to_constraint_upper['ROWINDEX'] = units_to_constraint_upper['DUID'].map(units_to_constraint_upper_rows)
+    print('Upper 2 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
     max_con = max_constraint_index(units_to_constraint_upper)
     units_to_constraint_lower_rows = units_to_constraint_lower_rows.reset_index(drop=True)
     units_to_constraint_lower_rows = save_index(units_to_constraint_lower_rows, 'ROWINDEX', max_con + 1)
     units_to_constraint_lower_rows = units_to_constraint_lower_rows.loc[:, ('DUID', 'ROWINDEX')]
     units_to_constraint_lower = pd.merge(units_to_constraint_lower, units_to_constraint_lower_rows, 'left', 'DUID')
-
+    print('Lower 2 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
     units_to_constraint = pd.concat([units_to_constraint_lower, units_to_constraint_upper])
 
     units_to_constraint = \
         units_to_constraint.loc[:, ('INDEX', 'ROWINDEX', 'LHSCOEFFICIENTS', 'CONSTRAINTTYPE', 'RHSCONSTANT')]
+    print('Finnish {}'.format(perf_counter() - t0))
+    print('Total {}'.format(perf_counter() - ta))
     return units_to_constraint
 
 

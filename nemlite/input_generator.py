@@ -4,7 +4,6 @@ from nemosis import data_fetch_methods
 from nemosis import defaults
 from nemosis import query_wrapers
 from datetime import datetime, timedelta
-from joblib import Parallel, delayed
 from nemlite import nemlite_defaults
 
 
@@ -17,12 +16,12 @@ def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtere
     date_times_generator_2 = datetime_dispatch_sequence(start_time_obj, end_time_obj, delta)
 
     if run_pre_filter:
-        with Parallel(n_jobs=1) as pool:
-            # Pre filter dispatch constraint first as some tables are filtered based of its filtered files.
-            run_pf('DISPATCHCONSTRAINT', start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
-            # Pre filter the rest of the tables.
-            pool(delayed(run_pf)(table, start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
-                 for table in nemlite_defaults.parent_tables if table != 'DISPATCHCONSTRAINT')
+        # Pre filter dispatch constraint first as some tables are filtered based of its filtered files.
+        run_pf('DISPATCHCONSTRAINT', start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
+        # Pre filter the rest of the tables.
+        for table in nemlite_defaults.parent_tables:
+            if table != 'DISPATCHCONSTRAINT':
+                run_pf(table, start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
 
     return actual_inputs_generator(date_times_generator_2, filtered_data_folder)
 
