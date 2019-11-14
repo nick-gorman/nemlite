@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 from time import time
-from joblib import Parallel
 from nemlite import declare_names as dn
 from nemlite import solver_interface
 
@@ -21,35 +20,30 @@ def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditio
     results_price = []
 
     regions_to_price = list(regional_demand['REGIONID'])
+    # Create a linear programing problem and definitions of the problem variables.
+    combined_constraints, rhs_and_inequality_types, objective_coefficients, \
+    var_definitions, inter_variable_bounds, region_req_by_row = \
+        create_lp_as_dataframes(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditions,
+                                regulated_interconnectors,
+                                regional_demand, dispatch_unit_price_bids, regulated_interconnectors_loss_model,
+                                ns, connection_point_constraints, interconnector_constraints, constraint_data,
+                                region_constraints, regulated_interconnector_loss_factor_model,
+                                market_interconnectors, market_interconnector_price_bids,
+                                market_interconnector_capacity_bids)
 
-    with Parallel(n_jobs=6) as pool:
-        # Create a linear programing problem and definitions of the problem variables.
-        combined_constraints, rhs_and_inequality_types, objective_coefficients, \
-        var_definitions, inter_variable_bounds, region_req_by_row = \
-            create_lp_as_dataframes(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditions,
-                                    regulated_interconnectors,
-                                    regional_demand, dispatch_unit_price_bids, regulated_interconnectors_loss_model,
-                                    ns, connection_point_constraints, interconnector_constraints, constraint_data,
-                                    region_constraints, regulated_interconnector_loss_factor_model,
-                                    market_interconnectors, market_interconnector_price_bids,
-                                    market_interconnector_capacity_bids)
+    # Solve a number of variations of the base problem. These are the problem with the actual loads for each region
+    # and an extra solve for each region where a marginal load of 1 MW is added. The dispatches of each
+    # dispatch unit are returned for each solve, as well as the interconnector flows.
+    dispatches, inter_flows = \
+        solver_interface.solve_lp(var_definitions, inter_variable_bounds, combined_constraints,
+                                  objective_coefficients, rhs_and_inequality_types, region_req_by_row,
+                                  regions_to_price)
 
-        # Solve a number of variations of the base problem. These are the problem with the actual loads for each region
-        # and an extra solve for each region where a marginal load of 1 MW is added. The dispatches of each
-        # dispatch unit are returned for each solve, as well as the interconnector flows.
-        b = time()
-        dispatches, inter_flows = \
-            solver_interface.solve_lp(var_definitions, inter_variable_bounds, combined_constraints,
-                                      objective_coefficients, rhs_and_inequality_types, region_req_by_row,
-                                      regions_to_price)
-        print('time in solver interface {}'.format(time()-b))
-
-        # The price of energy in each region is calculated. This is done by comparing the results of the base dispatch
-        # with the results of dispatches with the marginal load added.
-        results_price, results_service, results_state = \
-            price_regions(dispatches['BASERUN'], dispatches, dispatch_unit_information, results_price, results_service,
-                          results_state, regions_to_price, market_cap_and_floor)
-
+    # The price of energy in each region is calculated. This is done by comparing the results of the base dispatch
+    # with the results of dispatches with the marginal load added.
+    results_price, results_service, results_state = \
+        price_regions(dispatches['BASERUN'], dispatches, dispatch_unit_information, results_price, results_service,
+                      results_state, regions_to_price, market_cap_and_floor)
     # Turn the results lists into a pandas dataframe, note currently only the energy service is priced.
     results_dataframe = pd.DataFrame({'State': results_state, 'Service': results_service,
                                       'Price': results_price})
