@@ -1777,7 +1777,9 @@ def joint_energy_and_reg_constraints(bids_and_indexes, capacity_bids, max_con, r
     units = list(units_with_reg_and_energy['DUID'])
     print('Set up 2 {}'.format(perf_counter() - t0))
     t0 = perf_counter()
-    constraint_variables = bids_and_indexes[bids_and_indexes['DUID'].isin(units)].copy()
+    constraint_variables = bids_and_indexes[(bids_and_indexes['DUID'].isin(units) &
+                                             ((bids_and_indexes['BIDTYPE'] == 'ENERGY') |
+                                              (bids_and_indexes['BIDTYPE'] == reg_service)))].copy()
     #constraint_variables = pd.merge(bids_and_indexes, units_with_reg_and_energy, 'left', on='DUID')
     print('Set up 3 {}'.format(perf_counter() - t0))
     t0 = perf_counter()
@@ -1841,7 +1843,7 @@ def joint_energy_and_reg_constraints(bids_and_indexes, capacity_bids, max_con, r
     #units_to_constraint = units_to_constraint[['INDEX', 'ROWINDEX', 'LHSCOEFFICIENTS', 'CONSTRAINTTYPE', 'RHSCONSTANT']]
     print('Finnish {}'.format(perf_counter() - t0))
     print('Total {}'.format(perf_counter() - ta))
-    return [units_to_constraint_lower, units_to_constraint_upper]
+    return [units_to_constraint_upper, units_to_constraint_lower]
 
 
 def apply_fcas_enablement_criteria(capacity_bids, initial_conditions):
