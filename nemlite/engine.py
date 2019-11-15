@@ -1766,27 +1766,45 @@ def joint_energy_and_reg_constraints(bids_and_indexes, capacity_bids, max_con, r
     ta = perf_counter()
     t0 = perf_counter()
     units_with_reg_and_energy = bid_type_check[(bid_type_check[reg_service] == 1) & (bid_type_check['ENERGY'] == 1)]
-    units_with_reg_and_energy = units_with_reg_and_energy.reset_index(drop=True)
+    #units_with_reg_and_energy = units_with_reg_and_energy.reset_index(drop=True)
 
-    applicable_bids = bids_and_indexes[(bids_and_indexes['BIDTYPE'] == 'ENERGY') |
-                                       (bids_and_indexes['BIDTYPE'] == reg_service)]
-
-    constraint_variables = applicable_bids[applicable_bids['DUID'].isin(list(units_with_reg_and_energy['DUID']))]
-    #constraint_variables = pd.merge(bids_and_indexes, units_with_reg_and_energy, 'left', on='DUID')
-    print('Set up {}'.format(perf_counter() - t0))
+    #applicable_bids = bids_and_indexes[(bids_and_indexes['BIDTYPE'] == 'ENERGY') |
+    #                                   (bids_and_indexes['BIDTYPE'] == reg_service)]
+    print('Set up 1 {}'.format(perf_counter() - t0))
     t0 = perf_counter()
-    slope_coefficients = capacity_bids[capacity_bids['BIDTYPE'] == reg_service].copy()
-    slope_coefficients = slope_coefficients[slope_coefficients['BIDTYPE'] == reg_service]
+    units = list(units_with_reg_and_energy['DUID'])
+    print('Set up 2 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
+    constraint_variables = bids_and_indexes[bids_and_indexes['DUID'].isin(units)].copy()
+    #constraint_variables = pd.merge(bids_and_indexes, units_with_reg_and_energy, 'left', on='DUID')
+    print('Set up 3 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
+    slope_coefficients = capacity_bids[(capacity_bids['BIDTYPE'] == reg_service) &
+                                       (capacity_bids['DUID'].isin(units))].copy()
+    print('Slope 1 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
+    #slope_coefficients = slope_coefficients[slope_coefficients['BIDTYPE'] == reg_service]
     slope_coefficients['UPPERSLOPE'] = ((slope_coefficients['ENABLEMENTMAX'] - slope_coefficients['HIGHBREAKPOINT']) /
                                         slope_coefficients['MAXAVAIL'])
     slope_coefficients['LOWERSLOPE'] = ((slope_coefficients['LOWBREAKPOINT'] - slope_coefficients['ENABLEMENTMIN']) /
                                         slope_coefficients['MAXAVAIL'])
-
-    slope_coefficients = \
-        slope_coefficients.loc[:, ('DUID', 'UPPERSLOPE', 'LOWERSLOPE', 'ENABLEMENTMAX', 'ENABLEMENTMIN')]
-    print('Slope {}'.format(perf_counter() - t0))
+    print('Slope 2 {}'.format(perf_counter() - t0))
     t0 = perf_counter()
-    units_to_constraint_upper = pd.merge(constraint_variables, slope_coefficients, 'left', 'DUID')
+    #slope_coefficients = \
+    #    slope_coefficients.loc[:, ('DUID', 'UPPERSLOPE', 'LOWERSLOPE', 'ENABLEMENTMAX', 'ENABLEMENTMIN')]
+    upper_slope = dict(zip(slope_coefficients['DUID'], slope_coefficients['UPPERSLOPE']))
+    lower_slope = dict(zip(slope_coefficients['DUID'], slope_coefficients['LOWERSLOPE']))
+    enable_max = dict(zip(slope_coefficients['DUID'], slope_coefficients['ENABLEMENTMAX']))
+    enable_min = dict(zip(slope_coefficients['DUID'], slope_coefficients['ENABLEMENTMIN']))
+
+    print('Slope 3 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
+    constraint_variables['UPPERSLOPE'] = constraint_variables['DUID'].map(upper_slope)
+    constraint_variables['LOWERSLOPE'] = constraint_variables['DUID'].map(lower_slope)
+    constraint_variables['ENABLEMENTMAX'] = constraint_variables['DUID'].map(enable_max)
+    constraint_variables['ENABLEMENTMIN'] = constraint_variables["DUID"].map(enable_min)
+    units_to_constraint_upper = constraint_variables.copy()
+    #units_to_constraint_upper = pd.merge(constraint_variables, slope_coefficients, 'left', 'DUID')
     units_to_constraint_upper['LHSCOEFFICIENTS'] = np.where(units_to_constraint_upper['BIDTYPE'] == 'ENERGY', 1, 0)
     units_to_constraint_upper['LHSCOEFFICIENTS'] = np.where((units_to_constraint_upper['BIDTYPE'] == reg_service),
                                                             units_to_constraint_upper['UPPERSLOPE'],
@@ -1801,8 +1819,8 @@ def joint_energy_and_reg_constraints(bids_and_indexes, capacity_bids, max_con, r
     units_to_constraint_upper_rows = dict(zip(unique_duids, np.arange(max_con + 1, max_con + 1 + len(unique_duids))))
     print('Group 1 {}'.format(perf_counter() - t0))
     t0 = perf_counter()
-
-    units_to_constraint_lower = pd.merge(constraint_variables, slope_coefficients, 'left', 'DUID')
+    units_to_constraint_lower = constraint_variables.copy()
+    #units_to_constraint_lower = pd.merge(constraint_variables, slope_coefficients, 'left', 'DUID')
     units_to_constraint_lower['LHSCOEFFICIENTS'] = np.where(units_to_constraint_lower['BIDTYPE'] == 'ENERGY', 1, 0)
     units_to_constraint_lower['LHSCOEFFICIENTS'] = np.where((units_to_constraint_lower['BIDTYPE'] == reg_service),
                                                             -1 * units_to_constraint_lower['LOWERSLOPE'],
