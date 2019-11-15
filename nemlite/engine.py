@@ -1653,12 +1653,10 @@ def create_joint_capacity_constraints_raise(bids_and_indexes, capacity_bids, max
     t0 = perf_counter()
     units_with_reg_or_energy = bid_type_check[(bid_type_check['RAISEREG'] == 1) | (bid_type_check['ENERGY'] == 1)]
     units_with_raise_contingency = bids_and_indexes[(bids_and_indexes['BIDTYPE'] == raise_contingency_service)]
-    units_to_constraint_raise = bids_and_indexes[
-        (bids_and_indexes['DUID'].isin(list(units_with_reg_or_energy['DUID']))) &
-        (bids_and_indexes['DUID'].isin(list(units_with_raise_contingency['DUID']))) &
-        ((bids_and_indexes['BIDTYPE'] == 'RAISEREG') |
-         (bids_and_indexes['BIDTYPE'] == 'ENERGY') |
-         (bids_and_indexes['BIDTYPE'] == raise_contingency_service))]
+    print('0 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
+    units = set(units_with_reg_or_energy['DUID']).intersection(units_with_raise_contingency['DUID'])
+    units_to_constraint_raise = bids_and_indexes[bids_and_indexes['DUID'].isin(units)]
     print('1 {}'.format(perf_counter() - t0))
     t0 = perf_counter()
     upper_slope_coefficients = capacity_bids.copy()
@@ -1668,14 +1666,17 @@ def create_joint_capacity_constraints_raise(bids_and_indexes, capacity_bids, max
                                                upper_slope_coefficients['HIGHBREAKPOINT']) /
                                               upper_slope_coefficients['MAXAVAIL'])
     upper_slope_coefficients = upper_slope_coefficients.loc[:, ('DUID', 'UPPERSLOPE', 'ENABLEMENTMAX')]
-
+    print('2 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
     units_to_constraint_raise = pd.merge(units_to_constraint_raise, upper_slope_coefficients, 'left', 'DUID')
+    print('3 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
     units_to_constraint_raise['LHSCOEFFICIENTS'] = np.where(units_to_constraint_raise['BIDTYPE'] == 'ENERGY', 1, 0)
     units_to_constraint_raise['LHSCOEFFICIENTS'] = np.where((units_to_constraint_raise['BIDTYPE'] == 'RAISEREG') &
                                                             (units_to_constraint_raise[
                                                                  'CAPACITYBAND'] != 'FCASINTEGER'),
                                                             1, units_to_constraint_raise['LHSCOEFFICIENTS'])
-    print('2 {}'.format(perf_counter() - t0))
+    print('4 {}'.format(perf_counter() - t0))
     t0 = perf_counter()
     units_to_constraint_raise['LHSCOEFFICIENTS'] = \
         np.where((units_to_constraint_raise['BIDTYPE'] == raise_contingency_service) &
@@ -1687,12 +1688,20 @@ def create_joint_capacity_constraints_raise(bids_and_indexes, capacity_bids, max
     #units_to_constraint_raise_rows = save_index(units_to_constraint_raise_rows, 'ROWINDEX', max_con + 1)
     #units_to_constraint_raise_rows = units_to_constraint_raise_rows.loc[:, ('DUID', 'ROWINDEX')]
     #units_to_constraint_raise = pd.merge(units_to_constraint_raise, units_to_constraint_raise_rows, 'left', 'DUID')
-    unique_duids = units_to_constraint_raise['DUID'].unique()
-    constraint_rows = dict(zip(unique_duids, np.arange(max_con + 1, max_con + 1 + len(unique_duids))))
+    print('4.1 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
+    #unique_duids = units_to_constraint_raise['DUID'].unique()
+    print('4.2 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
+    constraint_rows = dict(zip(units, np.arange(max_con + 1, max_con + 1 + len(units))))
+    print('4.3 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
     units_to_constraint_raise['ROWINDEX'] = units_to_constraint_raise['DUID'].map(constraint_rows)
+    print('4.4 {}'.format(perf_counter() - t0))
+    t0 = perf_counter()
     units_to_constraint_raise = \
         units_to_constraint_raise.loc[:, ('INDEX', 'ROWINDEX', 'LHSCOEFFICIENTS', 'CONSTRAINTTYPE', 'RHSCONSTANT')]
-    print('3 {}'.format(perf_counter() - t0))
+    print('5 {}'.format(perf_counter() - t0))
     print('create_joint_capacity_constraints_raise {}'.format(perf_counter() - ta))
     return [units_to_constraint_raise]
 
