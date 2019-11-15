@@ -1743,18 +1743,12 @@ def create_joint_ramping_constraints(bids_and_indexes, initial_conditions, max_c
         constraint_variables['CONSTRAINTTYPE'] = '<='
         constraint_variables['RHSCONSTANT'] = \
             constraint_variables['INITIALMW'] + (constraint_variables['RAMPUPRATE'] / 12)
-        constraint_variables['LHSCOEFFICIENTS'] = np.where(constraint_variables['BIDTYPE'] == 'ENERGY', 1, 0)
-        constraint_variables['LHSCOEFFICIENTS'] = np.where((constraint_variables['BIDTYPE'] == 'RAISEREG') &
-                                                           (constraint_variables['CAPACITYBAND'] != 'FCASINTEGER'),
-                                                           1, constraint_variables['LHSCOEFFICIENTS'])
+        constraint_variables['LHSCOEFFICIENTS'] = 1
     elif regulation_service == 'LOWERREG':
         constraint_variables['CONSTRAINTTYPE'] = '>='
         constraint_variables['RHSCONSTANT'] = \
             constraint_variables['INITIALMW'] - (constraint_variables['RAMPDOWNRATE'] / 12)
-        constraint_variables['LHSCOEFFICIENTS'] = np.where(constraint_variables['BIDTYPE'] == 'ENERGY', 1, 0)
-        constraint_variables['LHSCOEFFICIENTS'] = np.where((constraint_variables['BIDTYPE'] == 'LOWERREG') &
-                                                           (constraint_variables['CAPACITYBAND'] != 'FCASINTEGER'),
-                                                           -1, constraint_variables['LHSCOEFFICIENTS'])
+        constraint_variables['LHSCOEFFICIENTS'] = np.where(constraint_variables['BIDTYPE'] == 'LOWERREG', -1, 1)
     constraint_variables = \
         constraint_variables.loc[:, ('INDEX', 'ROWINDEX', 'LHSCOEFFICIENTS', 'CONSTRAINTTYPE', 'RHSCONSTANT')]
 
