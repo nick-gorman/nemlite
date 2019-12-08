@@ -3,7 +3,8 @@ import numpy as np
 from time import time, perf_counter
 from nemlite import declare_names as dn
 from nemlite import solver_interface
-import numba
+from nemlite import bid_constraints
+from nemlite import helper_functions as hf
 
 
 def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditions, regulated_interconnectors,
@@ -52,51 +53,6 @@ def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditio
     return results_dataframe, dispatches, inter_flows
 
 
-def perform_feedback_processing(results_of_previous_dispatch, dynamic_ramp_rates):
-    initial_conditions = results_of_previous_dispatch['BASERUN'].loc[:, ('DUID', 'BIDTYPE', 'DISPATCHED')]
-    initial_conditions = initial_conditions[initial_conditions['BIDTYPE'] == 'ENERGY']
-    initial_conditions = initial_conditions.loc[:, ('DUID', 'BIDTYPE', 'DISPATCHED')]
-    initial_conditions = initial_conditions.groupby('DUID', as_index=False).sum()
-    initial_conditions.columns = ['DUID', 'INITIALMW']
-    dynamic_ramp_rates = dynamic_ramp_rates.loc[:, ('DUID', 'RAMPUPRATE', 'RAMPDOWNRATE', 'AVAILABILITY')]
-    initial_conditions = pd.merge(initial_conditions, dynamic_ramp_rates, 'right', 'DUID')
-    initial_conditions['INITIALMW'] = np.where(np.isnan(initial_conditions['INITIALMW']), 0,
-                                               initial_conditions['INITIALMW'])
-    return initial_conditions
-
-
-def create_problem(gen_info_raw: pd, capacity_bids_raw: pd, unit_solution_raw: pd, inter_direct_raw: pd,
-                   region_req_raw: pd, price_bids_raw: pd, inter_seg_definitions: pd,
-                   con_point_constraints, inter_gen_constraints, gen_con_data, region_constraints,
-                   inter_demand_coefficients, mnsp_inter, mnsp_price_bids, mnsp_capacity_bids, ns,
-                   market_cap_and_floor):
-    # Create a linear problem that defines the national electricity market for a given 5 minute dispatch interval.
-    # This requires a series of data tables in the form of pandas dataframes. Each dataframe defines an aspect of the
-    # market for a given interval, for a full description of each dataframe see supporting documentation.
-
-    # Create the linear program as a series of data frames.
-    constraint_matrix, rhs_coefficients, objective_coefficients, number_of_variables, number_of_constraints, \
-    var_definitions, inter_variable_bounds, inequality_type, inter_direct_raw, inter_penalty_factor, \
-    indices, region_req_by_row, mnsp_link_indexes, inter_seg_dispatch_order_constraints, \
-    mnsp_region_requirement_coefficients = \
-        create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, inter_direct_raw,
-                                region_req_raw, price_bids_raw, inter_seg_definitions,
-                                ns, con_point_constraints, inter_gen_constraints, gen_con_data,
-                                region_constraints, inter_demand_coefficients, mnsp_inter, mnsp_price_bids,
-                                mnsp_capacity_bids)
-    # Create the linear problem as a pulp object, pulp is an external tool for interfacing with linear solvers.
-    lp = solver_interface.EnergyMarketLp(number_of_variables, number_of_constraints, var_definitions,
-                                         inter_variable_bounds, constraint_matrix, objective_coefficients,
-                                         rhs_coefficients, ns, inequality_type, inter_penalty_factor, indices,
-                                         region_req_by_row, mnsp_link_indexes, market_cap_and_floor,
-                                         inter_seg_dispatch_order_constraints, mnsp_region_requirement_coefficients)
-
-    # Initialise the pulp problem
-    lp.pulp_setup()
-
-    return lp, var_definitions, inter_variable_bounds, region_req_by_row, lp.name_index_to_row_index
-
-
 def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, inter_direct_raw,
                             region_req_raw, price_bids_raw, inter_seg_definitions,
                             ns, con_point_constraints, inter_gen_constraints, gen_con_data,
@@ -116,15 +72,16 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
 
     # Create a data frame of the constraints that define generator capacity bids in the energy and FCAS markets. A
     # data frame that defines each variable used to represent the the bids in the linear program is also returned.
-    bidding_constraints, bid_variable_data = create_bidding_contribution_to_constraint_matrix(capacity_bids_raw.copy(),
-                                                                                              unit_solution_raw, ns)
+    bidding_constraints, bid_variable_data = \
+        bid_constraints.create_bidding_contribution_to_constraint_matrix(capacity_bids_raw.copy(),
+                                                                         unit_solution_raw, ns)
 
     # Find the current maximum index of the system variable, so new variable can be assigned correct unique indexes.
     max_var_index = max_variable_index(bidding_constraints)
 
     # Find the current maximum index of the system constraints, so new constraints can be assigned correct unique
     # indexes.
-    max_con_index = max_constraint_index(bidding_constraints)
+    max_con_index = hf.max_constraint_index(bidding_constraints)
     joint_capacity_constraints = create_joint_capacity_constraints(bid_variable_data, capacity_bids_raw,
                                                                    unit_solution_raw, max_con_index)
 
@@ -139,14 +96,14 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
 
     # Find the current maximum index of the system constraints, so new constraints can be assigned correct unique
     # indexes.
-    max_con_index = max_constraint_index(joint_capacity_constraints)
+    max_con_index = hf.max_constraint_index(joint_capacity_constraints)
 
     # Create constraints that ensure interconnector segments are dispatched the correct order.
     inter_seg_dispatch_order_constraints = \
         create_inter_seg_dispatch_order_constraints(inter_bounds, max_con_index, max_var_index)
 
     # Create the RHS sides of the constraints that force regional demand and FCAS requirements to be met.
-    max_con_index = max_constraint_index(inter_seg_dispatch_order_constraints)
+    max_con_index = hf.max_constraint_index(inter_seg_dispatch_order_constraints)
     region_req_by_row = create_region_req_contribution_to_constraint_matrix(region_req_raw, max_con_index, ns)
 
     # Create the coefficients that determine how much a generator contributes to meeting a regions requirements.
@@ -183,7 +140,7 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
     mnsp_con_data = mnsp_con_data.loc[:, ('INTERCONNECTORID', 'LHSFACTOR', 'INDEX')]
 
     # Create generic constraints, these are the generally the network constraints calculated by AEMO.
-    max_con_index = max_constraint_index(region_req_by_row)
+    max_con_index = hf.max_constraint_index(region_req_by_row)
     generic_constraints, type_and_rhs = create_generic_constraints(con_point_constraints, inter_gen_constraints,
                                                                    gen_con_data, bid_variable_data,
                                                                    inter_bounds, duid_info, max_con_index,
@@ -282,7 +239,7 @@ def create_mnsp_link_indexes(mnsp_capacity_bids, max_var_index):
     type_name = 'CAPACITYBAND'
     value_name = 'BIDVALUE'
     stacked_bids = stack_columns(mnsp_capacity_bids, cols_to_keep, cols_to_stack, type_name, value_name)
-    stacked_bids = save_index(stacked_bids, 'INDEX', max_var_index + 1)
+    stacked_bids = hf.save_index(stacked_bids, 'INDEX', max_var_index + 1)
     return stacked_bids
 
 
@@ -296,12 +253,6 @@ def match_against_inter_data(mnsp_data, all_inter_data):
 def max_variable_index(newest_variable_data):
     # Find the maximum variable index already in use in the constraint matrix.
     max_index = newest_variable_data['INDEX'].max()
-    return max_index
-
-
-def max_constraint_index(newest_variable_data):
-    # Find the maximum constraint index already in use in the constraint matrix.
-    max_index = newest_variable_data['ROWINDEX'].max()
     return max_index
 
 
@@ -379,7 +330,7 @@ def create_generic_constraints(connection_point_constraints, inter_constraints, 
     type_and_rhs = combined_constraints.loc[:, ('CONSTRAINTTYPE', 'RHS', 'GENCONID', 'GENERICCONSTRAINTWEIGHT')]
     # Make just unique constraints, giving each constraint a specific row index in the constraint matrix.
     type_and_rhs = type_and_rhs.drop_duplicates(subset='GENCONID', keep='first')
-    type_and_rhs = save_index(type_and_rhs.reset_index(drop=True), 'ROWINDEX', index_offset + 1)
+    type_and_rhs = hf.save_index(type_and_rhs.reset_index(drop=True), 'ROWINDEX', index_offset + 1)
 
     # Make the row index into the combined constraints dataframe.
     combined_constraints = pd.merge(combined_constraints, type_and_rhs, 'inner', 'GENCONID')
@@ -398,137 +349,6 @@ def create_generic_constraints(connection_point_constraints, inter_constraints, 
     type_and_rhs.columns = ['CONSTRAINTTYPE', 'RHSCONSTANT', 'GENCONID', 'CONSTRAINTWEIGHT', 'ROWINDEX']
 
     return combined_constraints, type_and_rhs
-
-
-def create_bidding_contribution_to_constraint_matrix(capacity_bids, unit_solution, ns):
-    original = capacity_bids.copy()
-    # Fast start plants must conform to their dispatch profiles, therefore their maximum available energy are overridden
-    # to match the dispatch profiles.
-    # capacity_bids = over_ride_max_energy_for_fast_start_plants(capacity_bids.copy(), unit_solution, fast_start_gens)
-
-    # Add an additional column that defines the maximum output of a plant, considering its, max avail bid, its stated
-    # availability in the previous intervals unit solution and its a ramp rates.
-    capacity_bids = add_max_unit_energy(capacity_bids, unit_solution, ns)
-    capacity_bids = add_min_unit_energy(capacity_bids, unit_solution, ns)
-
-    # If the maximum energy of a plant is below its minimum energy then reset the minimum energy to equal that maximum.
-    # Note this means the plants is being constrained up by is minimum energy level.
-    capacity_bids = rationalise_max_energy_constraint(capacity_bids)
-
-    # Any units where their maximum available energy is zero have all their bids removed.
-    bids_with_zero_avail_removed = remove_energy_bids_with_max_energy_zero(capacity_bids.copy())
-    bids_with_zero_avail_removed = remove_fcas_bids_with_max_avail_zero(bids_with_zero_avail_removed)
-
-    bids_with_zero_avail_removed = pd.merge(bids_with_zero_avail_removed,
-                                            unit_solution.loc[:,
-                                            ('DUID', 'RAISEREGENABLEMENTMAX', 'RAISEREGENABLEMENTMIN',
-                                             'LOWERREGENABLEMENTMAX', 'LOWERREGENABLEMENTMIN',
-                                             'RAMPDOWNRATE', 'RAMPUPRATE')],
-                                            'left', ['DUID'])
-
-    bids_with_filtered_fcas = fcas_trapezium_scaling(bids_with_zero_avail_removed)
-    # bids_with_filtered_fcas = bids_with_zero_avail_removed
-
-    bids_with_filtered_fcas = apply_fcas_enablement_criteria(bids_with_filtered_fcas.copy(), unit_solution.copy())
-
-    # Create a unique variable index for each bid going into the constraint matrix.
-    bids_and_indexes = create_bidding_index(bids_with_filtered_fcas, ns)
-
-    # Define the row indexes of the constraints arising from the bids data.
-    bids_and_data = create_constraint_row_indexes(bids_and_indexes.copy(), capacity_bids, ns)  # type: pd.DataFrame
-    # Add additional constraints based on units maximum energy.
-    max_con_index = max_constraint_index(bids_and_data)
-    unit_max_energy_constraints = create_max_unit_energy_constraints(bids_and_indexes.copy(), capacity_bids.copy(),
-                                                                     max_con_index, ns)
-    # Combine bidding constraints and maximum energy constraints.
-    bids_and_data = pd.concat([bids_and_data, unit_max_energy_constraints], sort=False)  # type: pd.DataFrame
-    # Add additional constraints based on unit minimum energy (ramp down rates).
-    max_con_index = max_constraint_index(bids_and_data)
-    unit_min_energy_constraints = create_min_unit_energy_constraints(bids_and_indexes.copy(), capacity_bids.copy(),
-                                                                     max_con_index, ns)
-    bids_and_data = pd.concat([bids_and_data, unit_min_energy_constraints], sort=False)  # type: pd.DataFrame
-
-    bids_and_data = pd.merge(bids_and_data,
-                             capacity_bids.loc[:, ('DUID', 'BIDTYPE', 'MAXENERGY', 'MINENERGY')],
-                             'left', ['DUID', 'BIDTYPE'])
-
-    # For each type of bid variable and type of constraint set the constraint matrix coefficient value.
-    bids_coefficients = add_lhs_coefficients(bids_and_data, ns)
-    # For each type of constraint set the constraint matrix right hand side value.
-    bids_all_data = add_rhs_constant(bids_coefficients, ns)
-    return bids_all_data, bids_and_indexes
-
-
-def fcas_trapezium_scaling(bids_and_data):
-    bids_and_data['MAXAVAIL'] = np.where((bids_and_data['MAXAVAIL'] > bids_and_data['RAMPUPRATE'] / 12) &
-                                         (bids_and_data['BIDTYPE'] == 'RAISEREG'), bids_and_data['RAMPUPRATE'] / 12,
-                                         bids_and_data['MAXAVAIL'])
-
-    bids_and_data['MAXAVAIL'] = np.where((bids_and_data['MAXAVAIL'] > bids_and_data['RAMPDOWNRATE'] / 12) &
-                                         (bids_and_data['BIDTYPE'] == 'LOWERREG'), bids_and_data['RAMPDOWNRATE'] / 12,
-                                         bids_and_data['MAXAVAIL'])
-
-    bids_and_data['ENABLEMENTMAX'] = np.where(
-        (bids_and_data['ENABLEMENTMAX'] > bids_and_data['RAISEREGENABLEMENTMAX']) &
-        (bids_and_data['BIDTYPE'] == 'RAISEREG')
-        & (bids_and_data['RAISEREGENABLEMENTMAX'] > 0.0),
-        bids_and_data['RAISEREGENABLEMENTMAX'], bids_and_data['ENABLEMENTMAX'])
-
-    bids_and_data['HIGHBREAKPOINT'] = np.where(
-        (bids_and_data['ENABLEMENTMAX'] > bids_and_data['RAISEREGENABLEMENTMAX']) &
-        (bids_and_data['BIDTYPE'] == 'RAISEREG')
-        & (bids_and_data['RAISEREGENABLEMENTMAX'] > 0.0),
-        bids_and_data['HIGHBREAKPOINT'] - (bids_and_data['ENABLEMENTMAX'] - bids_and_data['RAISEREGENABLEMENTMAX']),
-        bids_and_data['HIGHBREAKPOINT'])
-
-    bids_and_data['ENABLEMENTMIN'] = np.where(
-        (bids_and_data['ENABLEMENTMIN'] < bids_and_data['RAISEREGENABLEMENTMIN']) &
-        (bids_and_data['BIDTYPE'] == 'RAISEREG')
-        & (bids_and_data['RAISEREGENABLEMENTMIN'] > 0.0),
-        bids_and_data['RAISEREGENABLEMENTMIN'], bids_and_data['ENABLEMENTMIN'])
-
-    bids_and_data['LOWBREAKPOINT'] = np.where(
-        (bids_and_data['ENABLEMENTMIN'] < bids_and_data['RAISEREGENABLEMENTMIN']) &
-        (bids_and_data['BIDTYPE'] == 'RAISEREG')
-        & (bids_and_data['RAISEREGENABLEMENTMIN'] > 0.0),
-        bids_and_data['LOWBREAKPOINT'] + (bids_and_data['RAISEREGENABLEMENTMIN'] - bids_and_data['ENABLEMENTMIN']),
-        bids_and_data['LOWBREAKPOINT'])
-
-    bids_and_data['ENABLEMENTMAX'] = np.where(
-        (bids_and_data['ENABLEMENTMAX'] > bids_and_data['LOWERREGENABLEMENTMAX']) &
-        (bids_and_data['BIDTYPE'] == 'LOWERREG')
-        & (bids_and_data['LOWERREGENABLEMENTMAX'] > 0.0),
-        bids_and_data['LOWERREGENABLEMENTMAX'], bids_and_data['ENABLEMENTMAX'])
-
-    bids_and_data['HIGHBREAKPOINT'] = np.where(
-        (bids_and_data['ENABLEMENTMAX'] > bids_and_data['LOWERREGENABLEMENTMAX']) &
-        (bids_and_data['BIDTYPE'] == 'LOWERREG')
-        & (bids_and_data['LOWERREGENABLEMENTMAX'] > 0.0),
-        bids_and_data['HIGHBREAKPOINT'] - (bids_and_data['ENABLEMENTMAX'] - bids_and_data['LOWERREGENABLEMENTMAX']),
-        bids_and_data['HIGHBREAKPOINT'])
-
-    bids_and_data['ENABLEMENTMIN'] = np.where(
-        (bids_and_data['ENABLEMENTMIN'] < bids_and_data['LOWERREGENABLEMENTMIN']) &
-        (bids_and_data['BIDTYPE'] == 'LOWERREG')
-        & (bids_and_data['LOWERREGENABLEMENTMIN'] > 0.0),
-        bids_and_data['LOWERREGENABLEMENTMIN'], bids_and_data['ENABLEMENTMIN'])
-
-    bids_and_data['LOWBREAKPOINT'] = np.where(
-        (bids_and_data['ENABLEMENTMIN'] < bids_and_data['LOWERREGENABLEMENTMIN']) &
-        (bids_and_data['BIDTYPE'] == 'LOWERREG')
-        & (bids_and_data['LOWERREGENABLEMENTMIN'] > 0.0),
-        bids_and_data['LOWBREAKPOINT'] + (bids_and_data['LOWERREGENABLEMENTMIN'] - bids_and_data['ENABLEMENTMIN']),
-        bids_and_data['LOWBREAKPOINT'])
-
-    return bids_and_data
-
-
-def rationalise_max_energy_constraint(capacity_bids):
-    # Reset the max energy where it is lower than the min energy.
-    capacity_bids['MAXENERGY'] = np.where(capacity_bids['MAXENERGY'] < capacity_bids['MINENERGY'],
-                                          capacity_bids['MINENERGY'], capacity_bids['MAXENERGY'])
-
-    return capacity_bids
 
 
 def create_region_req_contribution_to_constraint_matrix(latest_region_req, start_index, ns):
@@ -622,10 +442,10 @@ def create_one_directional_flow_constraints(pos_flow_vars, neg_flow_vars, max_ro
     neg_flow_vars = neg_flow_vars[neg_flow_vars['UPPERBOUND'] > 0.0001]
     neg_flow_vars = neg_flow_vars.sort_values('MWBREAKPOINT')
     first_neg_flow_vars = neg_flow_vars.groupby('INTERCONNECTORID', as_index=False).last()
-    decision_variables = save_index(first_neg_flow_vars.loc[:, ['INTERCONNECTORID']], 'INDEX', max_var + 1)
-    constraint_rows_neg = save_index(first_neg_flow_vars.loc[:, ['INTERCONNECTORID']], 'ROWINDEX', max_row + 1)
+    decision_variables = hf.save_index(first_neg_flow_vars.loc[:, ['INTERCONNECTORID']], 'INDEX', max_var + 1)
+    constraint_rows_neg = hf.save_index(first_neg_flow_vars.loc[:, ['INTERCONNECTORID']], 'ROWINDEX', max_row + 1)
     max_row = constraint_rows_neg['ROWINDEX'].max()
-    constraint_rows_pos = save_index(first_pos_flow_vars.loc[:, ['INTERCONNECTORID']], 'ROWINDEX', max_row + 1)
+    constraint_rows_pos = hf.save_index(first_pos_flow_vars.loc[:, ['INTERCONNECTORID']], 'ROWINDEX', max_row + 1)
     pos_flow_vars_coefficients = pd.merge(constraint_rows_pos, first_pos_flow_vars.loc[:,
                                                                ['INDEX', 'INTERCONNECTORID', 'UPPERBOUND',
                                                                 'MWBREAKPOINT']], 'inner', 'INTERCONNECTORID')
@@ -675,8 +495,8 @@ def create_pos_min_trigger_cons(pos_flow_vars_not_first, row_offset, var_offset)
     integer_var_coefficients = pos_flow_vars_not_first.copy()
     integer_var_coefficients = integer_var_coefficients.drop('INDEX', axis=1)
     integer_var_coefficients = integer_var_coefficients.reset_index(drop=True)
-    integer_var_coefficients = save_index(integer_var_coefficients, 'INDEX', var_offset + 1)
-    integer_var_coefficients = save_index(integer_var_coefficients, 'ROWINDEX', row_offset + 1)
+    integer_var_coefficients = hf.save_index(integer_var_coefficients, 'INDEX', var_offset + 1)
+    integer_var_coefficients = hf.save_index(integer_var_coefficients, 'ROWINDEX', row_offset + 1)
     # The coefficient is set as the segments maximum capacity multiplied by minus 1. See constraint form below for
     # reasoning.
     integer_var_coefficients['LHSCOEFFICIENTS'] = -1 * integer_var_coefficients['UPPERBOUND']
@@ -691,7 +511,7 @@ def create_pos_min_trigger_cons(pos_flow_vars_not_first, row_offset, var_offset)
     # Create the interconnector variable coefficients with indexes
     seg_var_coefficients = pos_flow_vars_not_first.copy()
     seg_var_coefficients = seg_var_coefficients.reset_index(drop=True)
-    seg_var_coefficients = save_index(seg_var_coefficients, 'ROWINDEX', row_offset + 1)
+    seg_var_coefficients = hf.save_index(seg_var_coefficients, 'ROWINDEX', row_offset + 1)
     # Set the coefficient values to 1. See constraint form below for reasoning.
     seg_var_coefficients['LHSCOEFFICIENTS'] = 1
     # The RHS value is 0, the same as above. See constraint form below for reasoning.
@@ -724,8 +544,8 @@ def create_pos_max_trigger_cons(pos_flow_vars_not_last, row_offset, var_offset):
     integer_var_coefficients = pos_flow_vars_not_last.copy()
     integer_var_coefficients = integer_var_coefficients.drop('INDEX', axis=1)
     integer_var_coefficients = integer_var_coefficients.reset_index(drop=True)
-    integer_var_coefficients = save_index(integer_var_coefficients, 'INDEX', var_offset + 1)
-    integer_var_coefficients = save_index(integer_var_coefficients, 'ROWINDEX', row_offset + 1)
+    integer_var_coefficients = hf.save_index(integer_var_coefficients, 'INDEX', var_offset + 1)
+    integer_var_coefficients = hf.save_index(integer_var_coefficients, 'ROWINDEX', row_offset + 1)
     # The coefficient is set as the segments maximum capacity. See constraint form below for reasoning.
     integer_var_coefficients['LHSCOEFFICIENTS'] = integer_var_coefficients['UPPERBOUND']
     # The RHS is set to zero. See constraint form below for reasoning.
@@ -739,7 +559,7 @@ def create_pos_max_trigger_cons(pos_flow_vars_not_last, row_offset, var_offset):
     # Create the interconnector variable coefficients with indexes.
     seg_var_coefficients = pos_flow_vars_not_last.copy()
     seg_var_coefficients = seg_var_coefficients.reset_index(drop=True)
-    seg_var_coefficients = save_index(seg_var_coefficients, 'ROWINDEX', row_offset + 1)
+    seg_var_coefficients = hf.save_index(seg_var_coefficients, 'ROWINDEX', row_offset + 1)
     # Set the coefficient values to minus 1. See constraint form below for reasoning.
     seg_var_coefficients['LHSCOEFFICIENTS'] = - 1
     # The RHS value is 0, the same as above. See constraint form below for reasoning.
@@ -772,23 +592,6 @@ def create_neg_flow_cons(neg_flow_vars, row_offset, var_offset):
     return pd.concat([min_trigger_cons, max_trigger_cons]), max_row, max_var
 
 
-def stack_columns(data_in, cols_to_keep, cols_to_stack, type_name, value_name):
-    # Wrapping pd.melt to make it easier to use in nemlite context.
-    stacked_data = pd.melt(data_in, id_vars=cols_to_keep, value_vars=cols_to_stack,
-                           var_name=type_name, value_name=value_name)
-    return stacked_data
-
-
-def save_index(dataframe, new_col_name, offset=0):
-    # Save the indexes of the data frame as an np array.
-    index_list = np.array(dataframe.index.values)
-    # Add an offset to each element of the array.
-    offset_index_list = index_list + offset
-    # Add the list of indexes as a column to the data frame.
-    dataframe[new_col_name] = offset_index_list
-    return dataframe
-
-
 def lhs_fcas_enable_min(low_break_point, low_enablement_value, unit_max_output):
     # Calculate the lhs coefficients for the constraint placed on generators due to their minimum dispatch required for
     # FACAS enablement.
@@ -801,104 +604,6 @@ def lhs_fcas_enable_max(high_break_point: np, high_enablement_value: np, unit_ma
     # FACAS enablement.
     lhs = (high_enablement_value - high_break_point) / unit_max_output
     return lhs
-
-
-def add_lhs_coefficients(bids_data_by_row, ns):
-    # For each type of unit bid variable determine the corresponding lhs coefficients in the constraint matrix.
-
-    # LHS for lower enablement limit for the fcas variables
-    # bids_data_by_row[ns.col_lhs_coefficients] = np.where(
-    #     (bids_data_by_row[ns.col_enablement_type] == ns.col_enablement_min) &
-    #     (bids_data_by_row[ns.col_bid_type] != ns.type_energy),
-    #     lhs_fcas_enable_min(bids_data_by_row[ns.col_low_break_point],
-    #                         bids_data_by_row[ns.col_enablement_value],
-    #                         bids_data_by_row[ns.col_unit_max_output])
-    #     , 0)
-    # LHS for high enablement limit for the fcas variables
-    # bids_data_by_row[ns.col_lhs_coefficients] = np.where(
-    #     (bids_data_by_row[ns.col_enablement_type] == ns.col_enablement_max)
-    #     & (bids_data_by_row[ns.col_bid_type] != ns.type_energy),
-    #     lhs_fcas_enable_max(bids_data_by_row[ns.col_high_break_point],
-    #                         bids_data_by_row[ns.col_enablement_value],
-    #                         bids_data_by_row[ns.col_unit_max_output])
-    #     , bids_data_by_row[ns.col_lhs_coefficients])
-
-    # LHS for total fcas limit for fcas variables
-    bids_data_by_row[ns.col_lhs_coefficients] = np.where(
-        (bids_data_by_row[ns.col_bid_type] != ns.type_energy),
-        1, 0)
-
-    # LHS for high enablement limit for energy variables
-    # bids_data_by_row[ns.col_lhs_coefficients] = np.where(
-    #     (bids_data_by_row[ns.col_enablement_type] == ns.col_enablement_max)
-    #     & (bids_data_by_row[ns.col_bid_type] == ns.type_energy),
-    #     1, bids_data_by_row[ns.col_lhs_coefficients])
-
-    # LHS for low enablement limit for energy variables
-    # bids_data_by_row[ns.col_lhs_coefficients] = np.where(
-    #     (bids_data_by_row[ns.col_enablement_type] == ns.col_enablement_min)
-    #     & (bids_data_by_row[ns.col_bid_type] == ns.type_energy),
-    #     -1, bids_data_by_row[ns.col_lhs_coefficients])
-
-    # LHS for total fcas limit for energy variables
-    # bids_data_by_row[ns.col_lhs_coefficients] = np.where(
-    #     (bids_data_by_row[ns.col_enablement_type] == ns.col_fcas_integer_variable) &
-    #     (bids_data_by_row[ns.col_bid_type] == ns.type_energy),
-    #     0, bids_data_by_row[ns.col_lhs_coefficients])
-
-    # LHS for low enablement limit for fcas integer variable
-    # bids_data_by_row[ns.col_lhs_coefficients] = np.where(
-    #     (bids_data_by_row[ns.col_enablement_type] == ns.col_enablement_min) &
-    #     (bids_data_by_row[ns.col_capacity_band_number] == ns.col_fcas_integer_variable),
-    #     bids_data_by_row[ns.col_enablement_value], bids_data_by_row[ns.col_lhs_coefficients])
-
-    # LHS for high enablement limit for fcas integer variable
-    # bids_data_by_row[ns.col_lhs_coefficients] = np.where(
-    #     (bids_data_by_row[ns.col_enablement_type] == ns.col_enablement_max) &
-    #     (bids_data_by_row[ns.col_capacity_band_number] == ns.col_fcas_integer_variable),
-    #     -1 * (bids_data_by_row[ns.col_enablement_value] - bids_data_by_row[ns.col_max_unit_energy]),
-    #     bids_data_by_row[ns.col_lhs_coefficients])
-
-    # LHS for total fcas limit for fcas integer variable
-    # bids_data_by_row[ns.col_lhs_coefficients] = np.where(
-    #     (bids_data_by_row[ns.col_enablement_type] == ns.col_fcas_integer_variable) &
-    #     (bids_data_by_row[ns.col_capacity_band_number] == ns.col_fcas_integer_variable),
-    #     -bids_data_by_row[ns.col_unit_max_output], bids_data_by_row[ns.col_lhs_coefficients])
-
-    # LHS for max unit energy
-    bids_data_by_row[ns.col_lhs_coefficients] = np.where(
-        bids_data_by_row[ns.col_enablement_type] == ns.col_max_unit_energy,
-        1, bids_data_by_row[ns.col_lhs_coefficients])
-
-    # LHS for min unit energy
-    bids_data_by_row[ns.col_lhs_coefficients] = np.where(
-        bids_data_by_row[ns.col_enablement_type] == 'MINENERGY',
-        1, bids_data_by_row[ns.col_lhs_coefficients])
-
-    return bids_data_by_row
-
-
-def add_rhs_constant(combined_bids_col, ns):
-    # For each type of unit bid variable determine the corresponding rhs constant in the constraint matrix.
-
-    combined_bids_col[ns.col_rhs_constant] = combined_bids_col['MAXAVAIL']
-
-    # RHS for max energy constraint.
-    combined_bids_col[ns.col_rhs_constant] = np.where(
-        (combined_bids_col[ns.col_enablement_type] == ns.col_max_unit_energy),
-        combined_bids_col[ns.col_max_unit_energy], combined_bids_col[ns.col_rhs_constant])
-
-    # RHS for max FCAS constraint.
-    # combined_bids_col[ns.col_rhs_constant] = np.where(
-    #     (combined_bids_col[ns.col_enablement_type] == 'MAXAVAIL'),
-    #     combined_bids_col[ns.col_max_unit_energy], combined_bids_col[ns.col_rhs_constant])
-
-    # RHS for min energy constraint.
-    combined_bids_col[ns.col_rhs_constant] = np.where(
-        (combined_bids_col[ns.col_enablement_type] == 'MINENERGY'),
-        combined_bids_col['MINENERGY'], combined_bids_col[ns.col_rhs_constant])
-
-    return combined_bids_col
 
 
 def create_variable_bounds(cap_bidding_df, ns):
@@ -919,37 +624,8 @@ def create_objective_coefficient_by_duid_type_number(just_latest_bids, ns):
     cols_to_stack = ns.cols_bid_price_name_list
     type_name = ns.col_price_band_number
     value_name = ns.col_bid_value
-    stacked_bids = stack_columns(just_latest_bids, cols_to_keep, cols_to_stack, type_name, value_name)
+    stacked_bids = hf.stack_columns(just_latest_bids, cols_to_keep, cols_to_stack, type_name, value_name)
     return stacked_bids
-
-
-def create_bidding_index(capacity_bids, ns):
-    # Add an additional column that represents the integer variable associated with the FCAS on off decision
-    # capacity_bids = insert_col_fcas_integer_variable(capacity_bids, ns.col_fcas_integer_variable)
-
-    # Stack all the columns that represent an individual variable.
-    cols_to_keep = [ns.col_unit_name, ns.col_bid_type]
-    cols_to_stack = ns.cols_bid_cap_name_list.copy()
-    # cols_to_stack.append(ns.col_fcas_integer_variable)
-    type_name = ns.col_capacity_band_number
-    value_name = ns.col_bid_value
-    stacked_bids = stack_columns(capacity_bids, cols_to_keep, cols_to_stack, type_name, value_name)
-
-    # Remove the rows where the fcas bid is equal to zero.
-    stacked_bids = remove_gen_bids_with_zero_avail(stacked_bids, ns.col_bid_value)
-
-    # Remove rows where the band number is the FCAS integer variable but the type is energy. These do not exist in
-    # reality and are a by product of the way the variable was added to the data set.
-    stacked_bids = \
-        stacked_bids[(stacked_bids[ns.col_bid_type] != 'ENERGY')
-                     | ((stacked_bids[ns.col_bid_type] == 'ENERGY')
-                        & (stacked_bids[ns.col_capacity_band_number] != ns.col_fcas_integer_variable))].copy()
-
-    # Save the index of each bid.
-    stacked_bids = stacked_bids.reset_index(drop=True)
-    new_col_name = ns.col_variable_index
-    stacked_bids_index = save_index(stacked_bids, new_col_name)
-    return stacked_bids_index
 
 
 def insert_col_fcas_integer_variable(gen_variables_in_cols, new_col_name):
@@ -959,204 +635,13 @@ def insert_col_fcas_integer_variable(gen_variables_in_cols, new_col_name):
     return gen_variables_in_cols
 
 
-def remove_gen_bids_with_zero_avail(gen_bidding_data, avail_col):
-    # Remove the rows where the max avail is equal to zero.
-    gen_bidding_data = gen_bidding_data[(gen_bidding_data[avail_col] > 0.01)].copy()
-    return gen_bidding_data
-
-
-def remove_energy_bids_with_max_energy_zero(gen_bidding_data):
-    # Keep the bids if they have max energy greater than zero, or if they are FCAS bids.
-    gen_bidding_data = gen_bidding_data[(gen_bidding_data['MAXENERGY'] > 0.01) |
-                                        (gen_bidding_data['BIDTYPE'] != 'ENERGY')].copy()
-    return gen_bidding_data
-
-
-def remove_fcas_bids_with_max_avail_zero(gen_bidding_data):
-    # Keep the bids if they have max energy greater than zero, or if they are FCAS bids.
-    gen_bidding_data = gen_bidding_data[(gen_bidding_data['MAXAVAIL'] > 0.01) |
-                                        (gen_bidding_data['BIDTYPE'] == 'ENERGY')].copy()
-    return gen_bidding_data
-
-
-def add_max_unit_energy(capacity_bids, unit_solution, ns):
-    # Select just the energy bids.
-    just_energy = capacity_bids[capacity_bids[ns.col_bid_type] == 'ENERGY'].copy()
-
-    # Select just the information we need from the energy bids, which is unit and bid number for matching, index and max
-    # energy out put of plant.
-    just_energy = just_energy.loc[:, (ns.col_unit_name, ns.col_unit_max_output)]
-
-    # The unit solution file provides availability data, ramp rate data and initial condition output data. These are
-    # combined to give each unit a new availability number.
-    # Label the unit solution data as having bid type energy, so it can be integrated with the bidding data.
-    unit_solution[ns.col_bid_type] = 'ENERGY'
-    # Combine the initial dispatch of the unit and its ramp rate to give the max dispatch due to ramping constraints.
-    # TODO: Remove card code of 5 min dispatch.
-    unit_solution['MAXRAMPMW'] = unit_solution['INITIALMW'] + unit_solution['RAMPUPRATE'] / 12
-    # Choose the smallest limit between availability and ramp rate constraint as the actual availability.
-    unit_solution['MAXENERGY'] = np.where(unit_solution['AVAILABILITY'] > unit_solution['MAXRAMPMW'],
-                                          unit_solution['MAXRAMPMW'], unit_solution['AVAILABILITY'])
-    # Select just the data needed to map the new availability back to the bidding data.
-    just_energy_unit_solution = unit_solution.loc[:, (ns.col_unit_name, 'MAXENERGY', ns.col_bid_type)]
-    # From the bidding data select just the max availability given by generators.
-    just_max_avail = capacity_bids.loc[:, (ns.col_unit_name, ns.col_unit_max_output, ns.col_bid_type)]
-
-    # Check that availability is not lower than unit bid max energy, if it is then set availability as max energy.
-    max_energy = pd.merge(just_energy, just_energy_unit_solution, 'inner', on=['DUID'])
-    # max_energy['MAXENERGY'] = np.where(max_energy['MAXAVAIL'] > max_energy['MAXENERGY'],
-    #                                   max_energy['MAXENERGY'], max_energy['MAXAVAIL'])
-    max_energy = max_energy.loc[:, (ns.col_unit_name, ns.col_max_unit_energy)]
-
-    # Map the max energy availability given by each generator to all the bids given by that generator. This information
-    # is needed by all bids for constraint formulation.
-    bids_plus_energy_data = pd.merge(capacity_bids, max_energy, how='left', on=[ns.col_unit_name], sort=False)
-
-    # Map the max energy availability based on AEMO numbers back to the energy bids given by generators.
-    # bids_plus_energy_data = pd.merge(bids_plus_energy_data, just_energy_unit_solution, how='left',
-    #                                 on=[ns.col_unit_name, ns.col_bid_type], sort=False)
-
-    # Map the max energy availability given by each generator to the energy bids given by that generator. Note this
-    # give two copies of this value to some generators, the duplication is so they can be safely used in separate
-    # calculations.
-    # bids_plus_energy_data = pd.merge(bids_plus_energy_data, just_max_avail, how='left',
-    #                                 on=[ns.col_unit_name, ns.col_bid_type], sort=False)
-
-    # Set the max energy of generators bidding into the FACS market but not the energy market to zero.
-    bids_plus_energy_data[ns.col_max_unit_energy] = np.where(np.isnan(bids_plus_energy_data[ns.col_max_unit_energy]),
-                                                             0, bids_plus_energy_data[ns.col_max_unit_energy])
-
-    # If no availability data is provided by aemo then use the units own given availability number as a substitute.
-    # bids_plus_energy_data['AVAILABILITY'] = np.where(np.isnan(bids_plus_energy_data['AVAILABILITY']),
-    #                                                 bids_plus_energy_data[ns.col_unit_max_output],
-    #                                                 bids_plus_energy_data['AVAILABILITY'])
-
-    return bids_plus_energy_data
-
-
-def add_min_unit_energy(capacity_bids, unit_solution, ns):
-    # Select just the energy bids.
-    just_energy = capacity_bids[capacity_bids[ns.col_bid_type] == 'ENERGY'].copy()
-
-    # Select just the information we need from the energy bids, which is unit and bid number for matching, index and max
-    # energy out put of plant.
-    just_energy = just_energy.loc[:, (ns.col_unit_name, ns.col_unit_max_output)]
-
-    # The unit solution file provides availability data, ramp rate data and initial condition output data. These are
-    # combined to give each unit a new availability number.
-    # Label the unit solution data as having bid type energy, so it can be integrated with the bidding data.
-    unit_solution[ns.col_bid_type] = 'ENERGY'
-    # Combine the initial dispatch of the unit and its ramp rate to give the max dispatch due to ramping constraints.
-    # TODO: Remove card code of 5 min dispatch.
-    unit_solution['MINENERGY'] = unit_solution['INITIALMW'] - unit_solution['RAMPDOWNRATE'] / 12
-    # Ramp down constraints don't apply to plants in dispatch mode 1.
-    # unit_solution['MINENERGY'] = np.where(unit_solution['DISPATCHMODE']==1, 0, unit_solution['MINENERGY'])
-    min_energy = unit_solution.loc[:, ('DUID', 'MINENERGY')]
-
-    # Map the max energy availability given by each generator to all the bids given by that generator. This information
-    # is needed by all bids for constraint formulation.
-    bids_plus_energy_data = pd.merge(capacity_bids, min_energy, how='left', on=[ns.col_unit_name], sort=False)
-
-    # Set the max energy of generators bidding into the FACS market but not the energy market to zero.
-    bids_plus_energy_data['MINENERGY'] = np.where(np.isnan(bids_plus_energy_data['MINENERGY']),
-                                                  0, bids_plus_energy_data['MINENERGY'])
-
-    return bids_plus_energy_data
-
-
-def create_constraint_row_indexes(bidding_indexes, raw_data, ns) -> pd:
-    # Create the constraint rows needed to model the interaction between FCAS bids and energy bids. This is effectively
-    # creating the space in the constraint matrix for the inequality that make up the FCAS availability trapezium.
-
-    # Just use the FCAS bid data as only FCAS bids generate rows in the constraint matrix.
-    just_fcas = raw_data[raw_data[ns.col_bid_type] != 'ENERGY']
-    just_info_for_rows = just_fcas.loc[:, (ns.col_unit_name, ns.col_bid_type, ns.col_unit_max_output,
-                                           ns.col_low_break_point, ns.col_high_break_point, ns.col_enablement_min,
-                                           ns.col_enablement_max)]
-
-    # Stack the unit bid info based on enablement such that an index that corresponds to the constraint matrix row can
-    # be generated.
-    # cols_to_keep = [ns.col_unit_name, ns.col_bid_type, ns.col_unit_max_output, ns.col_low_break_point,
-    #                 ns.col_high_break_point]
-    # cols_to_stack = [ns.col_enablement_min, ns.col_enablement_max, ns.col_fcas_integer_variable]
-    # type_name = ns.col_enablement_type
-    # value_name = ns.col_enablement_value
-    # just_fcas_stacked_enablement = stack_columns(just_fcas, cols_to_keep, cols_to_stack, type_name, value_name)
-
-    # Create a new column to store the constraint row index.
-    new_col_name = ns.col_constraint_row_index
-    row_indexes = save_index(just_info_for_rows, new_col_name)
-    # row_indexes = row_indexes.drop(ns.col_unit_max_output, axis=1)
-
-    # Merge the row index data with fcas and energy index data such that information associated with each bid can be
-    # mapped to an exact place in the lp constraint matrix.
-    bid_data_fcas_row_index = pd.merge(bidding_indexes[bidding_indexes[ns.col_bid_type] != "ENERGY"],
-                                       row_indexes, how='left',
-                                       on=[ns.col_unit_name, ns.col_bid_type], sort=False)
-
-    # bid_data_energy_row_index = pd.merge(bidding_indexes[bidding_indexes[ns.col_bid_type] == "ENERGY"],
-    #                                      just_fcas_stacked_enablement.drop(ns.col_bid_type, axis=1),
-    #                                      how='inner',
-    #                                      on=[ns.col_unit_name], sort=False)
-    #
-    # bid_data_fcas_energy_row_index = pd.concat([bid_data_fcas_row_index, bid_data_energy_row_index])
-
-    return bid_data_fcas_row_index
-
-
-def create_max_unit_energy_constraints(bidding_indexes, raw_data, max_row_index, ns):
-    # Only need energy bid data.
-    constraint_rows = raw_data[raw_data[ns.col_bid_type] == ns.type_energy].copy()
-    # Create a constraint row for each generator bidding into the market.
-    constraint_rows = save_index(constraint_rows, ns.col_constraint_row_index, max_row_index + 1)
-    constraint_rows = constraint_rows.loc[:, (ns.col_unit_name, ns.col_constraint_row_index)]
-    # Merge constraint row indexes with generator bid indexes and max energy data.
-    indexes_and_constraints_rows = pd.merge(constraint_rows,
-                                            bidding_indexes[bidding_indexes[ns.col_bid_type] == ns.type_energy],
-                                            'inner', ns.col_unit_name)
-    # Set enablement type, as this is used to flag which calculation to use when constructing the lhs and rhs
-    # coefficients of the constraint matrix.
-    indexes_and_constraints_rows[ns.col_enablement_type] = ns.col_max_unit_energy
-    return indexes_and_constraints_rows
-
-
-def over_ride_max_energy_for_fast_start_plants(original_max_energy_constraints, unit_solutions, fast_start_defs):
-    # Merge in the unit solution which provides fast start mode info.
-    max_energy_constraints = \
-        pd.merge(original_max_energy_constraints, unit_solutions.loc[:, ('DUID', 'DISPATCHMODE')], 'left', 'DUID')
-    # Merge in fast start definitions which defines which plants are fast start plants.
-    max_energy_constraints = pd.merge(max_energy_constraints, fast_start_defs, 'left', 'DUID')
-    # If a fast start plant is operating in mode 1 then set its max energy to 0, else leave as is.
-    max_energy_constraints['MAXAVAIL'] = np.where(max_energy_constraints['DISPATCHMODE'] == 1, 0,
-                                                  max_energy_constraints['MAXAVAIL'])
-    return max_energy_constraints
-
-
-def create_min_unit_energy_constraints(bidding_indexes, raw_data, max_row_index, ns):
-    # Only need energy bid data.
-    constraint_rows = raw_data[raw_data[ns.col_bid_type] == ns.type_energy].copy()
-    # Create constraint row indexes for each unit.
-    constraint_rows = save_index(constraint_rows, ns.col_constraint_row_index, max_row_index + 1)
-    constraint_rows = constraint_rows.loc[:, (ns.col_unit_name, ns.col_constraint_row_index)]
-    # Merge in bidding data to constraint row data.
-    indexes_and_constraints_rows = pd.merge(constraint_rows,
-                                            bidding_indexes[bidding_indexes[ns.col_bid_type] == ns.type_energy],
-                                            'inner', ns.col_unit_name)
-    # Set enablement type to constraint RHS and LHS is calculated correctly.
-    indexes_and_constraints_rows[ns.col_enablement_type] = 'MINENERGY'
-    # Select just relevant data.
-    indexes_and_constraints_rows = indexes_and_constraints_rows.loc[:, ('INDEX', 'ROWINDEX', 'DUID', 'ENABLEMENTTYPE'
-                                                                        , 'BIDTYPE')]
-    return indexes_and_constraints_rows
-
-
 def index_inter(inter_info: pd, inter_seg_definitions: pd, max_index: int, ns: object) -> pd:
     # Create a direction for each interconnector.
     cols_to_keep = [ns.col_inter_id]
     cols_to_stack = [ns.col_region_from, ns.col_region_to]
     type_name = ns.col_direction
     value_name = ns.col_region_id
-    stacked_inter_directions = stack_columns(inter_info, cols_to_keep, cols_to_stack, type_name, value_name)
+    stacked_inter_directions = hf.stack_columns(inter_info, cols_to_keep, cols_to_stack, type_name, value_name)
     stacked_inter_directions['DUMMYJOIN'] = 1
 
     # Create a separate interconnector type for each FCAS type.
@@ -1198,7 +683,7 @@ def index_inter(inter_info: pd, inter_seg_definitions: pd, max_index: int, ns: o
                                                                               ns.col_bid_type, 'LOSSSEGMENT'])
     # Create interconnector variable indexes.
     inter_multiplied_by_types = inter_multiplied_by_types.reset_index(drop=True)
-    inter_multiplied_by_types = save_index(inter_multiplied_by_types, ns.col_variable_index, max_index + 1)
+    inter_multiplied_by_types = hf.save_index(inter_multiplied_by_types, ns.col_variable_index, max_index + 1)
     # Delete dummy column used for joining data.
     inter_multiplied_by_types = inter_multiplied_by_types.drop('DUMMYJOIN', 1)
     return inter_multiplied_by_types
@@ -1206,9 +691,9 @@ def index_inter(inter_info: pd, inter_seg_definitions: pd, max_index: int, ns: o
 
 def index_region_constraints(raw_constraints, max_constraint_row_index, ns):
     # Create constraint rows for regional based constraints.
-    row_for_each_constraint = stack_columns(raw_constraints, [ns.col_region_id], ['TOTALDEMAND'],
+    row_for_each_constraint = hf.stack_columns(raw_constraints, [ns.col_region_id], ['TOTALDEMAND'],
                                             ns.col_region_constraint_type, ns.col_region_constraint_value)
-    row_for_each_constraint_indexed = save_index(row_for_each_constraint, ns.col_constraint_row_index,
+    row_for_each_constraint_indexed = hf.save_index(row_for_each_constraint, ns.col_constraint_row_index,
                                                  max_constraint_row_index + 1)
     return row_for_each_constraint_indexed
 
@@ -1632,12 +1117,12 @@ def create_joint_capacity_constraints(bids_and_indexes, capacity_bids, initial_c
         if fcas_service in ['LOWERREG', 'RAISEREG']:
             joint_constraints1 = create_joint_ramping_constraints(bids_and_indexes.copy(), initial_conditions.copy(),
                                                                   max_con, fcas_service, bid_type_check)
-            max_con = max_constraint_index(joint_constraints1[0])
+            max_con = hf.max_constraint_index(joint_constraints1[0])
             joint_constraints2 = joint_energy_and_reg_constraints(bids_and_indexes.copy(), capacity_bids.copy(),
                                                                   max_con, fcas_service, bid_type_check)
             joint_constraints = joint_constraints1 + joint_constraints2
 
-        max_con = max_constraint_index(joint_constraints[-1])
+        max_con = hf.max_constraint_index(joint_constraints[-1])
         combined_joint_capacity_constraints += joint_constraints
     print('Loop time in create_joint_capacity_constraints {}'.format(perf_counter() - ta))
     ta = perf_counter()
@@ -1862,7 +1347,7 @@ def joint_energy_and_reg_constraints(bids_and_indexes, capacity_bids, max_con, r
     units_to_constraint_upper['ROWINDEX'] = units_to_constraint_upper['DUID'].map(units_to_constraint_upper_rows)
     print('Upper 3 {}'.format(perf_counter() - t0))
     t0 = perf_counter()
-    max_con = max_constraint_index(units_to_constraint_upper)
+    max_con = hf.max_constraint_index(units_to_constraint_upper)
     unique_duids = units_to_constraint_lower['DUID'].unique()
     units_to_constraint_lower_rows = dict(zip(unique_duids, np.arange(max_con + 1, max_con + 1 + len(unique_duids))))
     units_to_constraint_lower['ROWINDEX'] = units_to_constraint_lower['DUID'].map(units_to_constraint_lower_rows)
@@ -1877,20 +1362,4 @@ def joint_energy_and_reg_constraints(bids_and_indexes, capacity_bids, max_con, r
     return [units_to_constraint_upper, units_to_constraint_lower]
 
 
-def apply_fcas_enablement_criteria(capacity_bids, initial_conditions):
-    initial_mw = initial_conditions.loc[:, ('DUID', 'INITIALMW', 'AGCSTATUS')]
 
-    bids_and_initial = pd.merge(capacity_bids, initial_mw)
-
-    available_for_fcas = bids_and_initial[
-        ((bids_and_initial['ENABLEMENTMIN'] <= bids_and_initial['INITIALMW']) &
-         (bids_and_initial['INITIALMW'] <= bids_and_initial['ENABLEMENTMAX']))
-        | (bids_and_initial['BIDTYPE'] == 'ENERGY')]
-
-    available_for_fcas = available_for_fcas[(available_for_fcas['AGCSTATUS'] == 1)
-                                            | (available_for_fcas['BIDTYPE'] != 'LOWERREG')
-                                            | (available_for_fcas['BIDTYPE'] != 'RAISERREG')]
-
-    available_for_fcas = available_for_fcas.drop(['INITIALMW', 'AGCSTATUS'], axis=1)
-
-    return available_for_fcas
