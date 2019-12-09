@@ -197,7 +197,7 @@ def create_mnsp_objective_coefficients(indexes, price_bids, ns):
                      'PRICEBAND7', 'PRICEBAND8', 'PRICEBAND9', 'PRICEBAND10']
     type_name = 'PRICEBAND'
     value_name = 'BID'
-    stacked_bids = stack_columns(price_bids, cols_to_keep, cols_to_stack, type_name, value_name)
+    stacked_bids = hf.stack_columns(price_bids, cols_to_keep, cols_to_stack, type_name, value_name)
     # Map in capacity band types so that each price band can be mapped to a variable index.
     stacked_bids = add_capacity_band_type(stacked_bids, ns)
     # Map in bid indexes.
@@ -238,7 +238,7 @@ def create_mnsp_link_indexes(mnsp_capacity_bids, max_var_index):
                      'BANDAVAIL8', 'BANDAVAIL9', 'BANDAVAIL10']
     type_name = 'CAPACITYBAND'
     value_name = 'BIDVALUE'
-    stacked_bids = stack_columns(mnsp_capacity_bids, cols_to_keep, cols_to_stack, type_name, value_name)
+    stacked_bids = hf.stack_columns(mnsp_capacity_bids, cols_to_keep, cols_to_stack, type_name, value_name)
     stacked_bids = hf.save_index(stacked_bids, 'INDEX', max_var_index + 1)
     return stacked_bids
 

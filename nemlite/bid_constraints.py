@@ -68,7 +68,7 @@ def add_max_unit_energy(capacity_bids, unit_solution):
 
     # Select just the information we need from the energy bids, which is unit and bid number for matching, index and max
     # energy out put of plant.
-    just_energy = just_energy.loc[:, ('DUID', 'MAXAVAIL')]
+    just_energy = just_energy.loc[:, ['DUID', 'MAXAVAIL']]
     just_energy.columns = ['DUID', 'OFFERMAXENERGY']
 
     # The unit solution file provides availability data, ramp rate data and initial condition output data. These are
@@ -80,39 +80,24 @@ def add_max_unit_energy(capacity_bids, unit_solution):
     unit_solution['MAXENERGY'] = np.where(unit_solution['AVAILABILITY'] > unit_solution['MAXRAMPMW'],
                                           unit_solution['MAXRAMPMW'], unit_solution['AVAILABILITY'])
     # Select just the data needed to map the new availability back to the bidding data.
-    just_energy_unit_solution = unit_solution.loc[:, ('DUID', 'MAXENERGY', 'BIDTYPE')]
-    # From the bidding data select just the max availability given by generators.
-    just_max_avail = capacity_bids.loc[:, ('DUID', 'MAXAVAIL', 'BIDTYPE')]
+    just_energy_unit_solution = unit_solution.loc[:, ['DUID', 'MAXENERGY', 'MAXRAMPMW']]
 
     # Check that availability is not lower than unit bid max energy, if it is then set availability as max energy.
     max_energy = pd.merge(just_energy, just_energy_unit_solution, 'inner', on=['DUID'])
-    # max_energy['MAXENERGY'] = np.where(max_energy['MAXAVAIL'] > max_energy['MAXENERGY'],
-    #                                   max_energy['MAXENERGY'], max_energy['MAXAVAIL'])
-    max_energy = max_energy.loc[:, ('DUID', 'MAXENERGY', 'OFFERMAXENERGY', 'MAXRAMPMW')]
+    # max_energy['MAXENERGY'] = np.where(max_energy['OFFERMAXENERGY'] > max_energy['MAXENERGY'],
+    #                                   max_energy['MAXENERGY'], max_energy['OFFERMAXENERGY'])
+    max_energy = max_energy.loc[:, ['DUID', 'MAXENERGY', 'OFFERMAXENERGY']]
 
     # Map the max energy availability given by each generator to all the bids given by that generator. This information
     # is needed by all bids for constraint formulation.
     bids_plus_energy_data = pd.merge(capacity_bids, max_energy, how='left', on=['DUID'], sort=False)
 
-    # Set the max energy of generators bidding into the FACS market but not the energy market to zero.
-    bids_plus_energy_data['MAXENERGY'] = np.where(np.isnan(bids_plus_energy_data['MAXENERGY']),
-                                                             0, bids_plus_energy_data['MAXENERGY'])
-
     return bids_plus_energy_data
 
 
-def add_min_unit_energy(capacity_bids, unit_solution, ns):
-    # Select just the energy bids.
-    just_energy = capacity_bids[capacity_bids[ns.col_bid_type] == 'ENERGY'].copy()
-
-    # Select just the information we need from the energy bids, which is unit and bid number for matching, index and max
-    # energy out put of plant.
-    just_energy = just_energy.loc[:, (ns.col_unit_name, ns.col_unit_max_output)]
-
+def add_min_unit_energy(capacity_bids, unit_solution):
     # The unit solution file provides availability data, ramp rate data and initial condition output data. These are
     # combined to give each unit a new availability number.
-    # Label the unit solution data as having bid type energy, so it can be integrated with the bidding data.
-    unit_solution[ns.col_bid_type] = 'ENERGY'
     # Combine the initial dispatch of the unit and its ramp rate to give the max dispatch due to ramping constraints.
     # TODO: Remove card code of 5 min dispatch.
     unit_solution['MINENERGY'] = unit_solution['INITIALMW'] - unit_solution['RAMPDOWNRATE'] / 12
@@ -122,11 +107,7 @@ def add_min_unit_energy(capacity_bids, unit_solution, ns):
 
     # Map the max energy availability given by each generator to all the bids given by that generator. This information
     # is needed by all bids for constraint formulation.
-    bids_plus_energy_data = pd.merge(capacity_bids, min_energy, how='left', on=[ns.col_unit_name], sort=False)
-
-    # Set the max energy of generators bidding into the FACS market but not the energy market to zero.
-    bids_plus_energy_data['MINENERGY'] = np.where(np.isnan(bids_plus_energy_data['MINENERGY']),
-                                                  0, bids_plus_energy_data['MINENERGY'])
+    bids_plus_energy_data = pd.merge(capacity_bids, min_energy, how='left', on=['DUID'], sort=False)
 
     return bids_plus_energy_data
 
