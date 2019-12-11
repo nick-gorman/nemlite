@@ -35,7 +35,7 @@ def create_bidding_contribution_to_constraint_matrix(capacity_bids, unit_solutio
     bids_with_filtered_fcas = apply_fcas_enablement_criteria(bids_with_filtered_fcas.copy(), unit_solution.copy())
 
     # Create a unique variable index for each bid going into the constraint matrix.
-    bids_and_indexes = create_bidding_index(bids_with_filtered_fcas, ns)
+    bids_and_indexes = create_bidding_index(bids_with_filtered_fcas.copy(), ns)
 
     # Define the row indexes of the constraints arising from the bids data.
     bids_and_data = create_constraint_row_indexes(bids_and_indexes.copy(), capacity_bids, ns)  # type: pd.DataFrame
@@ -59,7 +59,7 @@ def create_bidding_contribution_to_constraint_matrix(capacity_bids, unit_solutio
     bids_coefficients = add_lhs_coefficients(bids_and_data, ns)
     # For each type of constraint set the constraint matrix right hand side value.
     bids_all_data = add_rhs_constant(bids_coefficients, ns)
-    return bids_all_data, bids_and_indexes
+    return bids_all_data, bids_and_indexes, bids_with_filtered_fcas
 
 
 def add_max_unit_energy(capacity_bids, unit_solution):
@@ -149,7 +149,7 @@ def fcas_trapezium_scaling(bids_and_data):
         (bids_and_data['ENABLEMENTMAXUNSCALED'] > bids_and_data['RAISEREGENABLEMENTMAX']) &
         (bids_and_data['BIDTYPE'] == 'RAISEREG')
         & (bids_and_data['RAISEREGENABLEMENTMAX'] > 0.0),
-        bids_and_data['HIGHBREAKPOINT'] - (bids_and_data['ENABLEMENTMAX'] - bids_and_data['RAISEREGENABLEMENTMAX']),
+        bids_and_data['HIGHBREAKPOINT'] - (bids_and_data['ENABLEMENTMAXUNSCALED'] - bids_and_data['RAISEREGENABLEMENTMAX']),
         bids_and_data['HIGHBREAKPOINT'])
 
     bids_and_data['ENABLEMENTMIN'] = np.where(
@@ -162,7 +162,7 @@ def fcas_trapezium_scaling(bids_and_data):
         (bids_and_data['ENABLEMENTMINUNSCALED'] < bids_and_data['RAISEREGENABLEMENTMIN']) &
         (bids_and_data['BIDTYPE'] == 'RAISEREG')
         & (bids_and_data['RAISEREGENABLEMENTMIN'] > 0.0),
-        bids_and_data['LOWBREAKPOINT'] + (bids_and_data['RAISEREGENABLEMENTMIN'] - bids_and_data['ENABLEMENTMIN']),
+        bids_and_data['LOWBREAKPOINT'] + (bids_and_data['RAISEREGENABLEMENTMIN'] - bids_and_data['ENABLEMENTMINUNSCALED']),
         bids_and_data['LOWBREAKPOINT'])
 
     bids_and_data['ENABLEMENTMAX'] = np.where(
@@ -175,7 +175,7 @@ def fcas_trapezium_scaling(bids_and_data):
         (bids_and_data['ENABLEMENTMAXUNSCALED'] > bids_and_data['LOWERREGENABLEMENTMAX']) &
         (bids_and_data['BIDTYPE'] == 'LOWERREG')
         & (bids_and_data['LOWERREGENABLEMENTMAX'] > 0.0),
-        bids_and_data['HIGHBREAKPOINT'] - (bids_and_data['ENABLEMENTMAX'] - bids_and_data['LOWERREGENABLEMENTMAX']),
+        bids_and_data['HIGHBREAKPOINT'] - (bids_and_data['ENABLEMENTMAXUNSCALED'] - bids_and_data['LOWERREGENABLEMENTMAX']),
         bids_and_data['HIGHBREAKPOINT'])
 
     bids_and_data['ENABLEMENTMIN'] = np.where(
@@ -188,7 +188,7 @@ def fcas_trapezium_scaling(bids_and_data):
         (bids_and_data['ENABLEMENTMINUNSCALED'] < bids_and_data['LOWERREGENABLEMENTMIN']) &
         (bids_and_data['BIDTYPE'] == 'LOWERREG')
         & (bids_and_data['LOWERREGENABLEMENTMIN'] > 0.0),
-        bids_and_data['LOWBREAKPOINT'] + (bids_and_data['LOWERREGENABLEMENTMIN'] - bids_and_data['ENABLEMENTMIN']),
+        bids_and_data['LOWBREAKPOINT'] + (bids_and_data['LOWERREGENABLEMENTMIN'] - bids_and_data['ENABLEMENTMINUNSCALED']),
         bids_and_data['LOWBREAKPOINT'])
 
     bids_and_data['MAXAVAIL'] = np.where((bids_and_data['MAXAVAILUNSCALED'] > bids_and_data['RAMPUPRATE'] / 12) &
@@ -199,55 +199,55 @@ def fcas_trapezium_scaling(bids_and_data):
                                          (bids_and_data['BIDTYPE'] == 'LOWERREG'), bids_and_data['RAMPDOWNRATE'] / 12,
                                          bids_and_data['MAXAVAILUNSCALED'])
 
-    bids_and_data['LOWBREAKPOINT'] = np.where((bids_and_data['MAXAVAILUNSCALED'] > bids_and_data['RAMPUPRATE'] / 12) &
-                                              (bids_and_data['BIDTYPE'] == 'RAISEREG'),
-                                              v_scale_low_break_point(bids_and_data['RAMPUPRATE'] / 12,
-                                                                      bids_and_data['MAXAVAILUNSCALED'],
-                                                                      bids_and_data['ENABLEMENTMINUNSCALED'],
-                                                                      bids_and_data['LOWBREAKPOINT']),
-                                              bids_and_data['LOWBREAKPOINT'])
+    bids_and_data['LOWBREAKPOINT'] = v_scale_low_break_point(bids_and_data['RAMPUPRATE'] / 12,
+                                                             bids_and_data['MAXAVAILUNSCALED'],
+                                                             bids_and_data['ENABLEMENTMIN'],
+                                                             bids_and_data['LOWBREAKPOINT'],
+                                                             bids_and_data['BIDTYPE'],
+                                                             'RAISEREG')
 
-    bids_and_data['HIGHBREAKPOINT'] = np.where((bids_and_data['MAXAVAILUNSCALED'] > bids_and_data['RAMPUPRATE'] / 12) &
-                                               (bids_and_data['BIDTYPE'] == 'RAISEREG'),
-                                               v_scale_high_break_point(bids_and_data['RAMPUPRATE'] / 12,
-                                                                        bids_and_data['MAXAVAILUNSCALED'],
-                                                                        bids_and_data['ENABLEMENTMAXUNSCALED'],
-                                                                        bids_and_data['HIGHBREAKPOINT']),
-                                               bids_and_data['HIGHBREAKPOINT'])
+    bids_and_data['HIGHBREAKPOINT'] = v_scale_high_break_point(bids_and_data['RAMPUPRATE'] / 12,
+                                                               bids_and_data['MAXAVAILUNSCALED'],
+                                                               bids_and_data['ENABLEMENTMAX'],
+                                                               bids_and_data['HIGHBREAKPOINT'],
+                                                               bids_and_data['BIDTYPE'],
+                                                               'RAISEREG')
 
-    bids_and_data['LOWBREAKPOINT'] = np.where(
-        (bids_and_data['MAXAVAILUNSCALED'] > bids_and_data['RAMPDOWNRATE'] / 12) &
-        (bids_and_data['BIDTYPE'] == 'LOWERREG'),
-        v_scale_low_break_point(bids_and_data['RAMPUPRATE'] / 12,
-                                bids_and_data['MAXAVAILUNSCALED'],
-                                bids_and_data['ENABLEMENTMINUNSCALED'],
-                                bids_and_data['LOWBREAKPOINT']),
-        bids_and_data['LOWBREAKPOINT'])
+    bids_and_data['LOWBREAKPOINT'] = v_scale_low_break_point(bids_and_data['RAMPDOWNRATE'] / 12,
+                                                             bids_and_data['MAXAVAILUNSCALED'],
+                                                             bids_and_data['ENABLEMENTMIN'],
+                                                             bids_and_data['LOWBREAKPOINT'],
+                                                             bids_and_data['BIDTYPE'],
+                                                             'LOWERREG')
 
-    bids_and_data['HIGHBREAKPOINT'] = np.where(
-        (bids_and_data['MAXAVAILUNSCALED'] > bids_and_data['RAMPDOWNRATE'] / 12) &
-        (bids_and_data['BIDTYPE'] == 'LOWERREG'),
-        v_scale_high_break_point(bids_and_data['RAMPUPRATE'] / 12,
-                                 bids_and_data['MAXAVAILUNSCALED'],
-                                 bids_and_data['ENABLEMENTMAXUNSCALED'],
-                                 bids_and_data['HIGHBREAKPOINT']),
-        bids_and_data['HIGHBREAKPOINT'])
+    bids_and_data['HIGHBREAKPOINT'] = v_scale_high_break_point(bids_and_data['RAMPDOWNRATE'] / 12,
+                                                               bids_and_data['MAXAVAILUNSCALED'],
+                                                               bids_and_data['ENABLEMENTMAX'],
+                                                               bids_and_data['HIGHBREAKPOINT'],
+                                                               bids_and_data['BIDTYPE'],
+                                                               'LOWERREG')
 
     return bids_and_data
 
 
-def scale_low_break_point(ramp_rate, max_avail, enable_min, lower_break):
-    new_break = (ramp_rate - max_avail * (max_avail / (enable_min - lower_break))) / (
-            max_avail / (enable_min - lower_break))
+def scale_low_break_point(ramp_rate, max_avail, enable_min, low_break, reg_type, type_to_scale):
+    if (max_avail > ramp_rate) & (reg_type == type_to_scale) & (enable_min < low_break):
+        new_break = (ramp_rate - max_avail + (max_avail / (enable_min - low_break))) / (
+                max_avail / (enable_min - low_break))
+    else:
+        new_break = low_break
     return new_break
 
 
 v_scale_low_break_point = np.vectorize(scale_low_break_point)
 
 
-def scale_high_break_point(ramp_rate, max_avail, enable_max, high_break):
-    new_break = (ramp_rate - max_avail * (max_avail / (enable_max - high_break))) / (
-            max_avail / (enable_max - high_break))
+def scale_high_break_point(ramp_rate, max_avail, enable_max, high_break, reg_type, type_to_scale):
+    if (max_avail > ramp_rate) & (reg_type == type_to_scale) & (enable_max > high_break):
+        new_break = (ramp_rate - max_avail + ((-1 * max_avail) / (enable_max - high_break))) / (
+            (-1 * max_avail) / (enable_max - high_break))
+    else:
+        new_break = high_break
     return new_break
 
 

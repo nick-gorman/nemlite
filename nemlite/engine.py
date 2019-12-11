@@ -72,7 +72,7 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
 
     # Create a data frame of the constraints that define generator capacity bids in the energy and FCAS markets. A
     # data frame that defines each variable used to represent the the bids in the linear program is also returned.
-    bidding_constraints, bid_variable_data = \
+    bidding_constraints, bid_variable_data, capacity_bids_scaled = \
         bid_constraints.create_bidding_contribution_to_constraint_matrix(capacity_bids_raw.copy(),
                                                                          unit_solution_raw, ns)
 
@@ -82,7 +82,7 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
     # Find the current maximum index of the system constraints, so new constraints can be assigned correct unique
     # indexes.
     max_con_index = hf.max_constraint_index(bidding_constraints)
-    joint_capacity_constraints = create_joint_capacity_constraints(bid_variable_data, capacity_bids_raw,
+    joint_capacity_constraints = create_joint_capacity_constraints(bid_variable_data, capacity_bids_scaled,
                                                                    unit_solution_raw, max_con_index)
 
     # Create inter variables with indexes
