@@ -29,7 +29,7 @@ def create_bidding_contribution_to_constraint_matrix(capacity_bids, unit_solutio
                                              'RAMPDOWNRATE', 'RAMPUPRATE')],
                                             'left', ['DUID'])
 
-    bids_with_filtered_fcas = fcas_trapezium_scaling(bids_with_zero_avail_removed)
+    bids_with_filtered_fcas = bids_with_zero_avail_removed #fcas_trapezium_scaling(bids_with_zero_avail_removed)
     # bids_with_filtered_fcas = bids_with_zero_avail_removed
 
     bids_with_filtered_fcas = apply_fcas_enablement_criteria(bids_with_filtered_fcas.copy(), unit_solution.copy())
