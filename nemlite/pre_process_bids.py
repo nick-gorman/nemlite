@@ -57,8 +57,8 @@ def add_max_unit_energy(capacity_bids, unit_solution):
 
     # Check that availability is not lower than unit bid max energy, if it is then set availability as max energy.
     max_energy = pd.merge(just_energy, just_energy_unit_solution, 'inner', on=['DUID'])
-    # max_energy['MAXENERGY'] = np.where(max_energy['OFFERMAXENERGY'] > max_energy['MAXENERGY'],
-    #                                   max_energy['MAXENERGY'], max_energy['OFFERMAXENERGY'])
+    max_energy['MAXENERGY'] = np.where(max_energy['OFFERMAXENERGY'] > max_energy['MAXENERGY'],
+                                       max_energy['MAXENERGY'], max_energy['OFFERMAXENERGY'])
     max_energy = max_energy.loc[:, ['DUID', 'MAXENERGY', 'OFFERMAXENERGY']]
 
     # Map the max energy availability given by each generator to all the bids given by that generator. This information

@@ -5,7 +5,7 @@ from nemlite import declare_names as dn
 from nemlite import solver_interface
 from nemlite import bid_constraints
 from nemlite import helper_functions as hf
-
+from nemlite import pre_process_bids
 
 def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditions, regulated_interconnectors,
         regional_demand, dispatch_unit_price_bids, regulated_interconnectors_loss_model, connection_point_constraints,
@@ -69,12 +69,11 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
 
     # Create a list of the plants operating in fast start mode.
     # fast_start_du = define_fast_start_plants(price_bids_raw.copy())
-
+    capacity_bids_scaled = pre_process_bids.filter_and_scale(capacity_bids_raw.copy(), unit_solution_raw)
     # Create a data frame of the constraints that define generator capacity bids in the energy and FCAS markets. A
     # data frame that defines each variable used to represent the the bids in the linear program is also returned.
-    bidding_constraints, bid_variable_data, capacity_bids_scaled = \
-        bid_constraints.create_bidding_contribution_to_constraint_matrix(capacity_bids_raw.copy(),
-                                                                         unit_solution_raw, ns)
+    bidding_constraints, bid_variable_data = \
+        bid_constraints.create_bidding_contribution_to_constraint_matrix(capacity_bids_scaled.copy(), ns)
 
     # Find the current maximum index of the system variable, so new variable can be assigned correct unique indexes.
     max_var_index = max_variable_index(bidding_constraints)
