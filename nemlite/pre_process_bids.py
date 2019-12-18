@@ -28,10 +28,13 @@ def filter_and_scale(capacity_bids, unit_solution):
                                              'RAMPDOWNRATE', 'RAMPUPRATE')],
                                             'left', ['DUID'])
 
-    bids_with_filtered_fcas = fcas_trapezium_scaling(bids_with_zero_avail_removed)
+    bids_with_scaled_fcas = fcas_trapezium_scaling_on_telemetered_raise_reg_enablement(bids_with_zero_avail_removed)
+    bids_with_scaled_fcas = fcas_trapezium_scaling_on_telemetered_lower_reg_enablement(bids_with_scaled_fcas)
+    bids_with_scaled_fcas = fcas_trapezium_scaling_on_ramp_up_rate(bids_with_scaled_fcas)
+    bids_with_scaled_fcas = fcas_trapezium_scaling_on_ramp_down_rate(bids_with_scaled_fcas)
     # bids_with_filtered_fcas = bids_with_zero_avail_removed
 
-    bids_with_filtered_fcas = apply_fcas_enablement_criteria(bids_with_filtered_fcas.copy(), unit_solution.copy())
+    bids_with_filtered_fcas = apply_fcas_enablement_criteria(bids_with_scaled_fcas.copy(), unit_solution.copy())
     return bids_with_filtered_fcas
 
 
@@ -108,11 +111,9 @@ def remove_fcas_bids_with_max_avail_zero(gen_bidding_data):
     return gen_bidding_data
 
 
-def fcas_trapezium_scaling(bids_and_data):
+def fcas_trapezium_scaling_on_telemetered_raise_reg_enablement(bids_and_data):
     bids_and_data['ENABLEMENTMAXUNSCALED'] = bids_and_data['ENABLEMENTMAX']
     bids_and_data['ENABLEMENTMINUNSCALED'] = bids_and_data['ENABLEMENTMIN']
-    bids_and_data['MAXAVAILUNSCALED'] = bids_and_data['MAXAVAIL']
-
     bids_and_data['ENABLEMENTMAX'], bids_and_data['HIGHBREAKPOINT'] = \
         scale_upper_slope_based_on_telemetered_data(bids_and_data['ENABLEMENTMAXUNSCALED'],
                                                     bids_and_data['RAISEREGENABLEMENTMAX'],
@@ -126,7 +127,13 @@ def fcas_trapezium_scaling(bids_and_data):
                                                     bids_and_data['LOWBREAKPOINT'],
                                                     bids_and_data['BIDTYPE'],
                                                     'RAISEREG')
+    bids_and_data = bids_and_data.drop(['ENABLEMENTMAXUNSCALED', 'ENABLEMENTMINUNSCALED'], axis=1)
+    return bids_and_data
 
+
+def fcas_trapezium_scaling_on_telemetered_lower_reg_enablement(bids_and_data):
+    bids_and_data['ENABLEMENTMAXUNSCALED'] = bids_and_data['ENABLEMENTMAX']
+    bids_and_data['ENABLEMENTMINUNSCALED'] = bids_and_data['ENABLEMENTMIN']
     bids_and_data['ENABLEMENTMAX'], bids_and_data['HIGHBREAKPOINT'] = \
         scale_upper_slope_based_on_telemetered_data(bids_and_data['ENABLEMENTMAXUNSCALED'],
                                                     bids_and_data['LOWERREGENABLEMENTMAX'],
@@ -140,16 +147,16 @@ def fcas_trapezium_scaling(bids_and_data):
                                                     bids_and_data['LOWBREAKPOINT'],
                                                     bids_and_data['BIDTYPE'],
                                                     'LOWERREG')
+    bids_and_data = bids_and_data.drop(['ENABLEMENTMAXUNSCALED', 'ENABLEMENTMINUNSCALED'], axis=1)
+    return bids_and_data
 
+
+def fcas_trapezium_scaling_on_ramp_up_rate(bids_and_data):
+    bids_and_data['MAXAVAILUNSCALED'] = bids_and_data['MAXAVAIL']
     bids_and_data['MAXAVAIL'] = scale_max_available_based_on_ramp_rate(bids_and_data['MAXAVAILUNSCALED'],
                                                                        bids_and_data['RAMPUPRATE'] / 12,
                                                                        bids_and_data['BIDTYPE'],
                                                                        'RAISEREG')
-
-    bids_and_data['MAXAVAIL'] = scale_max_available_based_on_ramp_rate(bids_and_data['MAXAVAILUNSCALED'],
-                                                                       bids_and_data['RAMPDOWNRATE'] / 12,
-                                                                       bids_and_data['BIDTYPE'],
-                                                                       'LOWERREG')
 
     bids_and_data['LOWBREAKPOINT'] = scale_low_break_point(bids_and_data['RAMPUPRATE'] / 12,
                                                            bids_and_data['MAXAVAILUNSCALED'],
@@ -164,6 +171,16 @@ def fcas_trapezium_scaling(bids_and_data):
                                                              bids_and_data['HIGHBREAKPOINT'],
                                                              bids_and_data['BIDTYPE'],
                                                              'RAISEREG')
+    bids_and_data = bids_and_data.drop(['MAXAVAILUNSCALED'], axis=1)
+    return bids_and_data
+
+
+def fcas_trapezium_scaling_on_ramp_down_rate(bids_and_data):
+    bids_and_data['MAXAVAILUNSCALED'] = bids_and_data['MAXAVAIL']
+    bids_and_data['MAXAVAIL'] = scale_max_available_based_on_ramp_rate(bids_and_data['MAXAVAILUNSCALED'],
+                                                                       bids_and_data['RAMPDOWNRATE'] / 12,
+                                                                       bids_and_data['BIDTYPE'],
+                                                                       'LOWERREG')
 
     bids_and_data['LOWBREAKPOINT'] = scale_low_break_point(bids_and_data['RAMPDOWNRATE'] / 12,
                                                            bids_and_data['MAXAVAILUNSCALED'],
@@ -178,7 +195,7 @@ def fcas_trapezium_scaling(bids_and_data):
                                                              bids_and_data['HIGHBREAKPOINT'],
                                                              bids_and_data['BIDTYPE'],
                                                              'LOWERREG')
-
+    bids_and_data = bids_and_data.drop(['MAXAVAILUNSCALED'], axis=1)
     return bids_and_data
 
 
@@ -209,10 +226,10 @@ scale_upper_slope_based_on_telemetered_data = np.vectorize(scale_upper_slope_bas
 
 def scale_lower_slope_based_on_telemetered_data_s(enablement_min_as_bid, enablement_min_as_telemetered, low_break_point,
                                                 bid_type, bid_type_to_scale):
-    if ((bid_type == bid_type_to_scale) and (enablement_min_as_telemetered < enablement_min_as_bid) and
+    if ((bid_type == bid_type_to_scale) and (enablement_min_as_telemetered > enablement_min_as_bid) and
             (enablement_min_as_telemetered > 0.0)):
         enablement_min = enablement_min_as_telemetered
-        low_break_point = low_break_point + (enablement_min_as_bid - enablement_min_as_telemetered)
+        low_break_point = low_break_point + (enablement_min_as_telemetered - enablement_min_as_bid)
     else:
         enablement_min = enablement_min_as_bid
     return enablement_min, low_break_point
@@ -253,9 +270,13 @@ def apply_fcas_enablement_criteria(capacity_bids, initial_conditions):
          (bids_and_initial['INITIALMW'] <= bids_and_initial['ENABLEMENTMAX']))
         | (bids_and_initial['BIDTYPE'] == 'ENERGY')]
 
+    available_for_fcas = available_for_fcas[
+        (available_for_fcas['ENABLEMENTMIN'] <= available_for_fcas['MAXENERGY']) |
+        (available_for_fcas['BIDTYPE'] == 'ENERGY')]
+
     available_for_fcas = available_for_fcas[(available_for_fcas['AGCSTATUS'] == 1)
-                                            | (available_for_fcas['BIDTYPE'] != 'LOWERREG')
-                                            | (available_for_fcas['BIDTYPE'] != 'RAISERREG')]
+                                            | ((available_for_fcas['BIDTYPE'] != 'LOWERREG')
+                                               & (available_for_fcas['BIDTYPE'] != 'RAISEREG'))]
 
     available_for_fcas = available_for_fcas.drop(['INITIALMW', 'AGCSTATUS'], axis=1)
 

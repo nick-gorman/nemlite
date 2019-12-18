@@ -270,13 +270,16 @@ class TestScaleLowerSlopeBasedOnTelemeteredDataS(unittest.TestCase):
 
     def test_scale_right_bid_type(self):
         new_enablement, new_low_break_point = \
-            pre_process_bids.scale_lower_slope_based_on_telemetered_data_s(10, 5, 4, 'A', 'A')
-        self.assertEqual(new_enablement, 5)
+            pre_process_bids.scale_lower_slope_based_on_telemetered_data_s(enablement_min_as_bid=10,
+                                                                           enablement_min_as_telemetered=15,
+                                                                           low_break_point=4,
+                                                                           bid_type='A', bid_type_to_scale='A')
+        self.assertEqual(new_enablement, 15)
         self.assertEqual(new_low_break_point, 9)
 
-    def test_scale_ramp_rate_large_than_max(self):
+    def test_dont_scale_because_less_restrictive(self):
         new_enablement, new_low_break_point = \
-            pre_process_bids.scale_lower_slope_based_on_telemetered_data_s(10, 11, 6, 'A', 'A')
+            pre_process_bids.scale_lower_slope_based_on_telemetered_data_s(10, 9, 6, 'A', 'A')
         self.assertEqual(new_enablement, 10)
         self.assertEqual(new_low_break_point, 6)
 
@@ -324,3 +327,492 @@ class TestScaleHighBreakPointS(unittest.TestCase):
                                                                          high_break=15.0, reg_type='A',
                                                                          type_to_scale='A')
         self.assertEqual(new_high_break_point, 15.0)
+
+
+class TestFcasTrapeziumScalingOnTelemeteredRaiseRegEnablement(unittest.TestCase):
+    def test_nothing_to_scale_because_telemetered_less_restrictive(self):
+        enablement_max = [10, 15]
+        high_break_point = [5, 10]
+        raise_reg_enablement_max = [11, 16]
+        low_break_point = [5, 10]
+        enablement_min = [0, 0]
+        raise_reg_enablement_min = [0, 0]
+        bid_type = 'RAISEREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'RAISEREGENABLEMENTMAX': raise_reg_enablement_max, 'ENABLEMENTMIN': enablement_min,
+                                   'LOWBREAKPOINT': low_break_point, 'RAISEREGENABLEMENTMIN': raise_reg_enablement_min,
+                                   'BIDTYPE': bid_type})
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'RAISEREGENABLEMENTMAX': raise_reg_enablement_max,
+                                             'ENABLEMENTMIN': enablement_min, 'LOWBREAKPOINT': low_break_point,
+                                             'RAISEREGENABLEMENTMIN': raise_reg_enablement_min,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_telemetered_raise_reg_enablement(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_scale_just_upper_slope_of_first_row(self):
+        enablement_max = [10, 15]
+        high_break_point = [5, 10]
+        raise_reg_enablement_max = [9, 16]
+        low_break_point = [5, 10]
+        enablement_min = [0, 0]
+        raise_reg_enablement_min = [0, 0]
+        bid_type = 'RAISEREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'RAISEREGENABLEMENTMAX': raise_reg_enablement_max, 'ENABLEMENTMIN': enablement_min,
+                                   'LOWBREAKPOINT': low_break_point, 'RAISEREGENABLEMENTMIN': raise_reg_enablement_min,
+                                   'BIDTYPE': bid_type})
+        enablement_max = [9, 15]
+        high_break_point = [4, 10]
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'RAISEREGENABLEMENTMAX': raise_reg_enablement_max,
+                                             'ENABLEMENTMIN': enablement_min, 'LOWBREAKPOINT': low_break_point,
+                                             'RAISEREGENABLEMENTMIN': raise_reg_enablement_min,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_telemetered_raise_reg_enablement(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_scale_just_upper_slope_of_both_rows(self):
+        enablement_max = [10, 15]
+        high_break_point = [5, 10]
+        raise_reg_enablement_max = [9, 12]
+        low_break_point = [5, 10]
+        enablement_min = [0, 0]
+        raise_reg_enablement_min = [0, 0]
+        bid_type = 'RAISEREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'RAISEREGENABLEMENTMAX': raise_reg_enablement_max, 'ENABLEMENTMIN': enablement_min,
+                                   'LOWBREAKPOINT': low_break_point, 'RAISEREGENABLEMENTMIN': raise_reg_enablement_min,
+                                   'BIDTYPE': bid_type})
+        enablement_max = [9, 12]
+        high_break_point = [4, 7]
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'RAISEREGENABLEMENTMAX': raise_reg_enablement_max,
+                                             'ENABLEMENTMIN': enablement_min, 'LOWBREAKPOINT': low_break_point,
+                                             'RAISEREGENABLEMENTMIN': raise_reg_enablement_min,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_telemetered_raise_reg_enablement(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_scale_just_lower_slope_of_first_row(self):
+        enablement_max = [10, 15]
+        high_break_point = [5, 10]
+        raise_reg_enablement_max = [11, 16]
+        low_break_point = [5, 10]
+        enablement_min = [0, 0]
+        raise_reg_enablement_min = [1, 0]
+        bid_type = 'RAISEREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'RAISEREGENABLEMENTMAX': raise_reg_enablement_max, 'ENABLEMENTMIN': enablement_min,
+                                   'LOWBREAKPOINT': low_break_point, 'RAISEREGENABLEMENTMIN': raise_reg_enablement_min,
+                                   'BIDTYPE': bid_type})
+        low_break_point = [6, 10]
+        enablement_min = [1, 0]
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'RAISEREGENABLEMENTMAX': raise_reg_enablement_max,
+                                             'ENABLEMENTMIN': enablement_min, 'LOWBREAKPOINT': low_break_point,
+                                             'RAISEREGENABLEMENTMIN': raise_reg_enablement_min,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_telemetered_raise_reg_enablement(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_scale_all_slopes(self):
+        enablement_max = [10, 15]
+        high_break_point = [5, 10]
+        raise_reg_enablement_max = [7, 11]
+        low_break_point = [5, 10]
+        enablement_min = [0, 0]
+        raise_reg_enablement_min = [1, 2]
+        bid_type = 'RAISEREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'RAISEREGENABLEMENTMAX': raise_reg_enablement_max, 'ENABLEMENTMIN': enablement_min,
+                                   'LOWBREAKPOINT': low_break_point, 'RAISEREGENABLEMENTMIN': raise_reg_enablement_min,
+                                   'BIDTYPE': bid_type})
+        enablement_max = [7, 11]
+        high_break_point = [2, 6]
+        low_break_point = [6, 12]
+        enablement_min = [1, 2]
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'RAISEREGENABLEMENTMAX': raise_reg_enablement_max,
+                                             'ENABLEMENTMIN': enablement_min, 'LOWBREAKPOINT': low_break_point,
+                                             'RAISEREGENABLEMENTMIN': raise_reg_enablement_min,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_telemetered_raise_reg_enablement(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_scale_nothing_because_of_bid_type(self):
+        enablement_max = [10, 15]
+        high_break_point = [5, 10]
+        raise_reg_enablement_max = [7, 11]
+        low_break_point = [5, 10]
+        enablement_min = [0, 0]
+        raise_reg_enablement_min = [1, 2]
+        bid_type = 'LOWERREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'RAISEREGENABLEMENTMAX': raise_reg_enablement_max, 'ENABLEMENTMIN': enablement_min,
+                                   'LOWBREAKPOINT': low_break_point, 'RAISEREGENABLEMENTMIN': raise_reg_enablement_min,
+                                   'BIDTYPE': bid_type})
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'RAISEREGENABLEMENTMAX': raise_reg_enablement_max,
+                                             'ENABLEMENTMIN': enablement_min, 'LOWBREAKPOINT': low_break_point,
+                                             'RAISEREGENABLEMENTMIN': raise_reg_enablement_min,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_telemetered_raise_reg_enablement(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+
+class TestFcasTrapeziumScalingOnTelemeteredLowerRegEnablement(unittest.TestCase):
+    def test_nothing_to_scale_because_telemetered_less_restrictive(self):
+        enablement_max = [10, 15]
+        high_break_point = [5, 10]
+        raise_reg_enablement_max = [11, 16]
+        low_break_point = [5, 10]
+        enablement_min = [0, 0]
+        raise_reg_enablement_min = [0, 0]
+        bid_type = 'LOWERREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'LOWERREGENABLEMENTMAX': raise_reg_enablement_max, 'ENABLEMENTMIN': enablement_min,
+                                   'LOWBREAKPOINT': low_break_point, 'LOWERREGENABLEMENTMIN': raise_reg_enablement_min,
+                                   'BIDTYPE': bid_type})
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'LOWERREGENABLEMENTMAX': raise_reg_enablement_max,
+                                             'ENABLEMENTMIN': enablement_min, 'LOWBREAKPOINT': low_break_point,
+                                             'LOWERREGENABLEMENTMIN': raise_reg_enablement_min,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_telemetered_lower_reg_enablement(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_scale_just_upper_slope_of_first_row(self):
+        enablement_max = [10, 15]
+        high_break_point = [5, 10]
+        raise_reg_enablement_max = [9, 16]
+        low_break_point = [5, 10]
+        enablement_min = [0, 0]
+        raise_reg_enablement_min = [0, 0]
+        bid_type = 'LOWERREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'LOWERREGENABLEMENTMAX': raise_reg_enablement_max, 'ENABLEMENTMIN': enablement_min,
+                                   'LOWBREAKPOINT': low_break_point, 'LOWERREGENABLEMENTMIN': raise_reg_enablement_min,
+                                   'BIDTYPE': bid_type})
+        enablement_max = [9, 15]
+        high_break_point = [4, 10]
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'LOWERREGENABLEMENTMAX': raise_reg_enablement_max,
+                                             'ENABLEMENTMIN': enablement_min, 'LOWBREAKPOINT': low_break_point,
+                                             'LOWERREGENABLEMENTMIN': raise_reg_enablement_min,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_telemetered_lower_reg_enablement(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_scale_just_upper_slope_of_both_rows(self):
+        enablement_max = [10, 15]
+        high_break_point = [5, 10]
+        raise_reg_enablement_max = [9, 12]
+        low_break_point = [5, 10]
+        enablement_min = [0, 0]
+        raise_reg_enablement_min = [0, 0]
+        bid_type = 'LOWERREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'LOWERREGENABLEMENTMAX': raise_reg_enablement_max, 'ENABLEMENTMIN': enablement_min,
+                                   'LOWBREAKPOINT': low_break_point, 'LOWERREGENABLEMENTMIN': raise_reg_enablement_min,
+                                   'BIDTYPE': bid_type})
+        enablement_max = [9, 12]
+        high_break_point = [4, 7]
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'LOWERREGENABLEMENTMAX': raise_reg_enablement_max,
+                                             'ENABLEMENTMIN': enablement_min, 'LOWBREAKPOINT': low_break_point,
+                                             'LOWERREGENABLEMENTMIN': raise_reg_enablement_min,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_telemetered_lower_reg_enablement(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_scale_just_lower_slope_of_first_row(self):
+        enablement_max = [10, 15]
+        high_break_point = [5, 10]
+        raise_reg_enablement_max = [11, 16]
+        low_break_point = [5, 10]
+        enablement_min = [0, 0]
+        raise_reg_enablement_min = [1, 0]
+        bid_type = 'LOWERREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'LOWERREGENABLEMENTMAX': raise_reg_enablement_max, 'ENABLEMENTMIN': enablement_min,
+                                   'LOWBREAKPOINT': low_break_point, 'LOWERREGENABLEMENTMIN': raise_reg_enablement_min,
+                                   'BIDTYPE': bid_type})
+        low_break_point = [6, 10]
+        enablement_min = [1, 0]
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'LOWERREGENABLEMENTMAX': raise_reg_enablement_max,
+                                             'ENABLEMENTMIN': enablement_min, 'LOWBREAKPOINT': low_break_point,
+                                             'LOWERREGENABLEMENTMIN': raise_reg_enablement_min,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_telemetered_lower_reg_enablement(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_scale_all_slopes(self):
+        enablement_max = [10, 15]
+        high_break_point = [5, 10]
+        raise_reg_enablement_max = [7, 11]
+        low_break_point = [5, 10]
+        enablement_min = [0, 0]
+        raise_reg_enablement_min = [1, 2]
+        bid_type = 'LOWERREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'LOWERREGENABLEMENTMAX': raise_reg_enablement_max, 'ENABLEMENTMIN': enablement_min,
+                                   'LOWBREAKPOINT': low_break_point, 'LOWERREGENABLEMENTMIN': raise_reg_enablement_min,
+                                   'BIDTYPE': bid_type})
+        enablement_max = [7, 11]
+        high_break_point = [2, 6]
+        low_break_point = [6, 12]
+        enablement_min = [1, 2]
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'LOWERREGENABLEMENTMAX': raise_reg_enablement_max,
+                                             'ENABLEMENTMIN': enablement_min, 'LOWBREAKPOINT': low_break_point,
+                                             'LOWERREGENABLEMENTMIN': raise_reg_enablement_min,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_telemetered_lower_reg_enablement(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_scale_nothing_because_of_bid_type(self):
+        enablement_max = [10, 15]
+        high_break_point = [5, 10]
+        raise_reg_enablement_max = [7, 11]
+        low_break_point = [5, 10]
+        enablement_min = [0, 0]
+        raise_reg_enablement_min = [1, 2]
+        bid_type = 'RAISEREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'LOWERREGENABLEMENTMAX': raise_reg_enablement_max, 'ENABLEMENTMIN': enablement_min,
+                                   'LOWBREAKPOINT': low_break_point, 'LOWERREGENABLEMENTMIN': raise_reg_enablement_min,
+                                   'BIDTYPE': bid_type})
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'LOWERREGENABLEMENTMAX': raise_reg_enablement_max,
+                                             'ENABLEMENTMIN': enablement_min, 'LOWBREAKPOINT': low_break_point,
+                                             'LOWERREGENABLEMENTMIN': raise_reg_enablement_min,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_telemetered_lower_reg_enablement(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+
+class TestFcasTrapeziumScalingOnRampUpRate(unittest.TestCase):
+    def test_scale_nothing_as_ramp_rate_not_restrictive(self):
+        enablement_max = [10, 15]
+        high_break_point = [5.0, 10.0]
+        low_break_point = [5.0, 10.0]
+        enablement_min = [0, 0]
+        maxavail = [10, 20]
+        ramp_rate = [10 * 12, 20 * 12]
+        bid_type = 'RAISEREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'MAXAVAIL': maxavail, 'ENABLEMENTMIN': enablement_min, 'RAMPUPRATE': ramp_rate,
+                                   'LOWBREAKPOINT': low_break_point, 'BIDTYPE': bid_type})
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'MAXAVAIL': maxavail, 'ENABLEMENTMIN': enablement_min,
+                                             'RAMPUPRATE': ramp_rate, 'LOWBREAKPOINT': low_break_point,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_ramp_up_rate(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_scale(self):
+        enablement_max = [10, 15]
+        high_break_point = [5.0, 10.0]
+        low_break_point = [5.0, 10.0]
+        enablement_min = [0, 0]
+        maxavail = [10, 20]
+        ramp_rate = [5 * 12, 10 * 12]
+        bid_type = 'RAISEREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'MAXAVAIL': maxavail, 'ENABLEMENTMIN': enablement_min, 'RAMPUPRATE': ramp_rate,
+                                   'LOWBREAKPOINT': low_break_point, 'BIDTYPE': bid_type})
+        high_break_point = [7.5, 12.5]
+        low_break_point = [2.5, 5.0]
+        maxavail = [5.0, 10.0]
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'MAXAVAIL': maxavail, 'ENABLEMENTMIN': enablement_min,
+                                             'RAMPUPRATE': ramp_rate, 'LOWBREAKPOINT': low_break_point,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_ramp_up_rate(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_dont_scale_because_wrong_bid_type(self):
+        enablement_max = [10, 15]
+        high_break_point = [5.0, 10.0]
+        low_break_point = [5.0, 10.0]
+        enablement_min = [0, 0]
+        maxavail = [10, 20]
+        ramp_rate = [5 * 12, 10 * 12]
+        bid_type = 'LOWERREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'MAXAVAIL': maxavail, 'ENABLEMENTMIN': enablement_min, 'RAMPUPRATE': ramp_rate,
+                                   'LOWBREAKPOINT': low_break_point, 'BIDTYPE': bid_type})
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'MAXAVAIL': maxavail, 'ENABLEMENTMIN': enablement_min,
+                                             'RAMPUPRATE': ramp_rate, 'LOWBREAKPOINT': low_break_point,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_ramp_up_rate(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+
+class TestFcasTrapeziumScalingOnRampDOWNRate(unittest.TestCase):
+    def test_scale_nothing_as_ramp_rate_not_restrictive(self):
+        enablement_max = [10, 15]
+        high_break_point = [5.0, 10.0]
+        low_break_point = [5.0, 10.0]
+        enablement_min = [0, 0]
+        maxavail = [10, 20]
+        ramp_rate = [10 * 12, 20 * 12]
+        bid_type = 'LOWERREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'MAXAVAIL': maxavail, 'ENABLEMENTMIN': enablement_min, 'RAMPDOWNRATE': ramp_rate,
+                                   'LOWBREAKPOINT': low_break_point, 'BIDTYPE': bid_type})
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'MAXAVAIL': maxavail, 'ENABLEMENTMIN': enablement_min,
+                                             'RAMPDOWNRATE': ramp_rate, 'LOWBREAKPOINT': low_break_point,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_ramp_down_rate(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_scale(self):
+        enablement_max = [10, 15]
+        high_break_point = [5.0, 10.0]
+        low_break_point = [5.0, 10.0]
+        enablement_min = [0, 0]
+        maxavail = [10, 20]
+        ramp_rate = [5 * 12, 10 * 12]
+        bid_type = 'LOWERREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'MAXAVAIL': maxavail, 'ENABLEMENTMIN': enablement_min, 'RAMPDOWNRATE': ramp_rate,
+                                   'LOWBREAKPOINT': low_break_point, 'BIDTYPE': bid_type})
+        high_break_point = [7.5, 12.5]
+        low_break_point = [2.5, 5.0]
+        maxavail = [5.0, 10.0]
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'MAXAVAIL': maxavail, 'ENABLEMENTMIN': enablement_min,
+                                             'RAMPDOWNRATE': ramp_rate, 'LOWBREAKPOINT': low_break_point,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_ramp_down_rate(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_dont_scale_because_wrong_bid_type(self):
+        enablement_max = [10, 15]
+        high_break_point = [5.0, 10.0]
+        low_break_point = [5.0, 10.0]
+        enablement_min = [0, 0]
+        maxavail = [10, 20]
+        ramp_rate = [5 * 12, 10 * 12]
+        bid_type = 'RAISEREG'
+        input_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                   'MAXAVAIL': maxavail, 'ENABLEMENTMIN': enablement_min, 'RAMPDOWNRATE': ramp_rate,
+                                   'LOWBREAKPOINT': low_break_point, 'BIDTYPE': bid_type})
+        expected_output_data = pd.DataFrame({'ENABLEMENTMAX': enablement_max, 'HIGHBREAKPOINT': high_break_point,
+                                             'MAXAVAIL': maxavail, 'ENABLEMENTMIN': enablement_min,
+                                             'RAMPDOWNRATE': ramp_rate, 'LOWBREAKPOINT': low_break_point,
+                                             'BIDTYPE': bid_type})
+        output_data = pre_process_bids.fcas_trapezium_scaling_on_ramp_down_rate(input_data)
+        assert_frame_equal(output_data, expected_output_data)
+
+
+class TestApplyFcasEnablementCriteria(unittest.TestCase):
+    def test_all_units_meet_criteria(self):
+        duid = ['a', 'b', 'c']
+        initial_mw = [50, 111, 98]
+        agc_status = [1, 1, 1]
+        initial_cons = pd.DataFrame({'DUID': duid, 'INITIALMW': initial_mw, 'AGCSTATUS': agc_status})
+
+        duid = ['a', 'b', 'c']
+        bid_type = ['RAISEREG', 'LOWERREG', 'ENERGY']
+        enablement_min = [25, 80, 70]
+        enablement_max = [275, 150, 120]
+        max_energy = [30, 90, 60]
+        capacity_bids = pd.DataFrame({'DUID': duid, 'BIDTYPE': bid_type, 'ENABLEMENTMIN': enablement_min,
+                                      'ENABLEMENTMAX': enablement_max, 'MAXENERGY': max_energy})
+        expected_output_data = pd.DataFrame({'DUID': duid, 'BIDTYPE': bid_type, 'ENABLEMENTMIN': enablement_min,
+                                      'ENABLEMENTMAX': enablement_max, 'MAXENERGY': max_energy})
+        output_data = pre_process_bids.apply_fcas_enablement_criteria(capacity_bids, initial_cons)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_reg_services_filtered_out_if_agc_not_1(self):
+        duid = ['a', 'b', 'c']
+        initial_mw = [50, 111, 98]
+        agc_status = [0, 0, 0]
+        initial_cons = pd.DataFrame({'DUID': duid, 'INITIALMW': initial_mw, 'AGCSTATUS': agc_status})
+
+        duid = ['a', 'b', 'c']
+        bid_type = ['RAISEREG', 'LOWERREG', 'ENERGY']
+        enablement_min = [25, 80, 70]
+        enablement_max = [275, 150, 120]
+        max_energy = [30, 90, 60]
+        capacity_bids = pd.DataFrame({'DUID': duid, 'BIDTYPE': bid_type, 'ENABLEMENTMIN': enablement_min,
+                                      'ENABLEMENTMAX': enablement_max, 'MAXENERGY': max_energy})
+        expected_output_data = capacity_bids[capacity_bids['DUID']=='c']
+        output_data = pre_process_bids.apply_fcas_enablement_criteria(capacity_bids, initial_cons)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_filter_a_because_initial_lower_than_enablement_min(self):
+        duid = ['a', 'b', 'c']
+        initial_mw = [20, 111, 98]
+        agc_status = [1, 1, 1]
+        initial_cons = pd.DataFrame({'DUID': duid, 'INITIALMW': initial_mw, 'AGCSTATUS': agc_status})
+
+        duid = ['a', 'b', 'c']
+        bid_type = ['RAISEREG', 'LOWERREG', 'ENERGY']
+        enablement_min = [25, 80, 70]
+        enablement_max = [275, 150, 120]
+        max_energy = [30, 90, 60]
+        capacity_bids = pd.DataFrame({'DUID': duid, 'BIDTYPE': bid_type, 'ENABLEMENTMIN': enablement_min,
+                                      'ENABLEMENTMAX': enablement_max, 'MAXENERGY': max_energy})
+        expected_output_data = capacity_bids[capacity_bids['DUID'].isin(['b', 'c'])]
+        output_data = pre_process_bids.apply_fcas_enablement_criteria(capacity_bids, initial_cons)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_filter_b_because_initial_higher_than_enablement_max(self):
+        duid = ['a', 'b', 'c']
+        initial_mw = [50, 160, 98]
+        agc_status = [1, 1, 1]
+        initial_cons = pd.DataFrame({'DUID': duid, 'INITIALMW': initial_mw, 'AGCSTATUS': agc_status})
+
+        duid = ['a', 'b', 'c']
+        bid_type = ['RAISEREG', 'LOWERREG', 'ENERGY']
+        enablement_min = [25, 80, 70]
+        enablement_max = [275, 150, 120]
+        max_energy = [30, 90, 60]
+        capacity_bids = pd.DataFrame({'DUID': duid, 'BIDTYPE': bid_type, 'ENABLEMENTMIN': enablement_min,
+                                      'ENABLEMENTMAX': enablement_max, 'MAXENERGY': max_energy})
+        expected_output_data = capacity_bids[capacity_bids['DUID'].isin(['a', 'c'])]
+        output_data = pre_process_bids.apply_fcas_enablement_criteria(capacity_bids, initial_cons)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_dont_filter_energy_even_enablement_outside_bounds(self):
+        duid = ['a', 'b', 'c']
+        initial_mw = [50, 160, 60]
+        agc_status = [1, 1, 1]
+        initial_cons = pd.DataFrame({'DUID': duid, 'INITIALMW': initial_mw, 'AGCSTATUS': agc_status})
+
+        duid = ['a', 'b', 'c']
+        bid_type = ['RAISEREG', 'LOWERREG', 'ENERGY']
+        enablement_min = [25, 80, 70]
+        enablement_max = [275, 150, 120]
+        max_energy = [30, 90, 60]
+        capacity_bids = pd.DataFrame({'DUID': duid, 'BIDTYPE': bid_type, 'ENABLEMENTMIN': enablement_min,
+                                      'ENABLEMENTMAX': enablement_max, 'MAXENERGY': max_energy})
+        expected_output_data = capacity_bids[capacity_bids['DUID'].isin(['a', 'c'])]
+        output_data = pre_process_bids.apply_fcas_enablement_criteria(capacity_bids, initial_cons)
+        assert_frame_equal(output_data, expected_output_data)
+
+    def test_filter_if_max_energy_less_than_enablement_min(self):
+        duid = ['a', 'b', 'c']
+        initial_mw = [50, 160, 80]
+        agc_status = [1, 1, 1]
+        initial_cons = pd.DataFrame({'DUID': duid, 'INITIALMW': initial_mw, 'AGCSTATUS': agc_status})
+
+        duid = ['a', 'b', 'c']
+        bid_type = ['RAISEREG', 'LOWERREG', 'ENERGY']
+        max_energy = [10, 15, 60]
+        enablement_min = [25, 80, 70]
+        enablement_max = [275, 150, 120]
+        capacity_bids = pd.DataFrame({'DUID': duid, 'BIDTYPE': bid_type, 'ENABLEMENTMIN': enablement_min,
+                                      'ENABLEMENTMAX': enablement_max, 'MAXENERGY': max_energy})
+        expected_output_data = capacity_bids[capacity_bids['DUID'].isin(['c'])]
+        output_data = pre_process_bids.apply_fcas_enablement_criteria(capacity_bids, initial_cons)
+        assert_frame_equal(output_data, expected_output_data)
+
+
