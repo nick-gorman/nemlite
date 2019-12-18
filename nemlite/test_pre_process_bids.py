@@ -816,3 +816,45 @@ class TestApplyFcasEnablementCriteria(unittest.TestCase):
         assert_frame_equal(output_data, expected_output_data)
 
 
+class TestFilterAndScale(unittest.TestCase):
+    def test_run_with_no_change(self):
+        duid = ['a', 'b']
+        initial_mw = [50, 150]
+        agc_status = [1, 1]
+        raise_reg_enablement_max = [280, 0]
+        raise_reg_enablement_min = [20, 0]
+        lower_reg_enablement_max = [0, 160]
+        lower_reg_enablement_min = [0, 70]
+        availability = [100, 200]
+        ramp_up_rate = [50 * 12, 90 * 12]
+        ramp_down_rate = [50 * 12, 40 * 12]
+        initial_cons = pd.DataFrame({'DUID': duid, 'INITIALMW': initial_mw, 'AGCSTATUS': agc_status,
+                                     'RAISEREGENABLEMENTMAX': raise_reg_enablement_max,
+                                     'RAISEREGENABLEMENTMIN': raise_reg_enablement_min,
+                                     'LOWERREGENABLEMENTMAX': lower_reg_enablement_max,
+                                     'LOWERREGENABLEMENTMIN': lower_reg_enablement_min,
+                                     'AVAILABILITY': availability, 'RAMPUPRATE': ramp_up_rate,
+                                     'RAMPDOWNRATE': ramp_down_rate})
+
+        duid = ['a', 'b', 'a', 'b']
+        bid_type = ['RAISEREG', 'LOWERREG', 'ENERGY', 'ENERGY']
+        max_avail = [25, 30, 100, 110]
+        enablement_min = [25, 80, 0, 0]
+        enablement_max = [275, 150, 0, 0]
+        low_break_point = [45, 90, 0, 0]
+        high_break_point = [250, 130, 0, 0]
+        capacity_bids = pd.DataFrame({'DUID': duid, 'BIDTYPE': bid_type, 'ENABLEMENTMIN': enablement_min,
+                                      'ENABLEMENTMAX': enablement_max, 'MAXAVAIL': max_avail,
+                                      'HIGHBREAKPOINT': high_break_point, 'LOWBREAKPOINT': low_break_point})
+
+        expected_output_data = pd.merge(capacity_bids, initial_cons, on='DUID', how='left')
+        expected_output_data = expected_output_data.drop(
+            ['RAISEREGENABLEMENTMAX', 'RAISEREGENABLEMENTMIN', 'LOWERREGENABLEMENTMAX', 'LOWERREGENABLEMENTMIN',
+             'INITIALMW', 'AGCSTATUS', 'AVAILABILITY']
+            , axis=1)
+        expected_output_data['MAXENERGY'] = [100, 110, 100, 110]
+        expected_output_data['MINENERGY'] = [0, 110, 0, 110]
+        output_data = pre_process_bids.filter_and_scale(capacity_bids, initial_cons)
+        expected_output_data = expected_output_data.loc[:, output_data.columns]
+        expected_output_data = expected_output_data.sort_values('DUID').reset_index(drop=True)
+        assert_frame_equal(expected_output_data, output_data)
