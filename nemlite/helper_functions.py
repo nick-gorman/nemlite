@@ -1,6 +1,7 @@
 import numpy as np
 import  pandas as pd
 
+
 def save_index(dataframe, new_col_name, offset=0):
     # Save the indexes of the data frame as an np array.
     index_list = np.array(dataframe.index.values)

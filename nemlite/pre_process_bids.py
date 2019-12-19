@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-from nemlite import helper_functions as hf
 
 
 def filter_and_scale(capacity_bids, unit_solution):
@@ -32,7 +31,6 @@ def filter_and_scale(capacity_bids, unit_solution):
     bids_with_scaled_fcas = fcas_trapezium_scaling_on_telemetered_lower_reg_enablement(bids_with_scaled_fcas)
     bids_with_scaled_fcas = fcas_trapezium_scaling_on_ramp_up_rate(bids_with_scaled_fcas)
     bids_with_scaled_fcas = fcas_trapezium_scaling_on_ramp_down_rate(bids_with_scaled_fcas)
-    # bids_with_filtered_fcas = bids_with_zero_avail_removed
     bids_with_filtered_fcas = apply_fcas_enablement_criteria(bids_with_scaled_fcas.copy(), unit_solution.copy())
     bids_with_filtered_fcas = bids_with_filtered_fcas.drop(
         ['RAISEREGENABLEMENTMAX', 'RAISEREGENABLEMENTMIN', 'LOWERREGENABLEMENTMAX', 'LOWERREGENABLEMENTMIN',

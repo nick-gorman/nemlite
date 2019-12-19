@@ -5,21 +5,21 @@ from nemlite import helper_functions as hf
 
 def create_bidding_contribution_to_constraint_matrix(capacity_bids, ns):
     # Create a unique variable index for each bid going into the constraint matrix.
-    bids_and_indexes = create_bidding_index(capacity_bids.copy(), ns)
+    bids_and_indexes = create_bidding_index(capacity_bids.copy())
 
     # Define the row indexes of the constraints arising from the bids data.
-    bids_and_data = create_constraint_row_indexes(bids_and_indexes.copy(), capacity_bids, ns)  # type: pd.DataFrame
+    #bids_and_data = create_constraint_row_indexes(bids_and_indexes.copy(), capacity_bids, ns)
     # Add additional constraints based on units maximum energy.
-    max_con_index = hf.max_constraint_index(bids_and_data)
+    #max_con_index = hf.max_constraint_index(bids_and_data)
     unit_max_energy_constraints = create_max_unit_energy_constraints(bids_and_indexes.copy(), capacity_bids.copy(),
-                                                                     max_con_index, ns)
+                                                                     0, ns)
     # Combine bidding constraints and maximum energy constraints.
-    bids_and_data = pd.concat([bids_and_data, unit_max_energy_constraints], sort=False)  # type: pd.DataFrame
+    bids_and_data = unit_max_energy_constraints #pd.concat([bids_and_data, unit_max_energy_constraints], sort=False)
     # Add additional constraints based on unit minimum energy (ramp down rates).
     max_con_index = hf.max_constraint_index(bids_and_data)
     unit_min_energy_constraints = create_min_unit_energy_constraints(bids_and_indexes.copy(), capacity_bids.copy(),
                                                                      max_con_index, ns)
-    bids_and_data = pd.concat([bids_and_data, unit_min_energy_constraints], sort=False)  # type: pd.DataFrame
+    bids_and_data = pd.concat([bids_and_data, unit_min_energy_constraints], sort=False)
 
     bids_and_data = pd.merge(bids_and_data,
                              capacity_bids.loc[:, ('DUID', 'BIDTYPE', 'MAXENERGY', 'MINENERGY')],
@@ -32,36 +32,25 @@ def create_bidding_contribution_to_constraint_matrix(capacity_bids, ns):
     return bids_all_data, bids_and_indexes
 
 
-def create_bidding_index(capacity_bids, ns):
-    # Add an additional column that represents the integer variable associated with the FCAS on off decision
-    # capacity_bids = insert_col_fcas_integer_variable(capacity_bids, ns.col_fcas_integer_variable)
-
+def create_bidding_index(capacity_bids):
     # Stack all the columns that represent an individual variable.
-    cols_to_keep = [ns.col_unit_name, ns.col_bid_type]
-    cols_to_stack = ns.cols_bid_cap_name_list.copy()
-    # cols_to_stack.append(ns.col_fcas_integer_variable)
-    type_name = ns.col_capacity_band_number
-    value_name = ns.col_bid_value
-    stacked_bids = hf.stack_columns(capacity_bids, cols_to_keep, cols_to_stack, type_name, value_name)
+    stacked_bids = hf.stack_columns(capacity_bids, cols_to_keep=['DUID', 'BIDTYPE'],
+                                    cols_to_stack=['BANDAVAIL1', 'BANDAVAIL2', 'BANDAVAIL3', 'BANDAVAIL4', 'BANDAVAIL5',
+                                                   'BANDAVAIL6', 'BANDAVAIL7', 'BANDAVAIL8', 'BANDAVAIL9',
+                                                   'BANDAVAIL10'],
+                                    type_name='CAPACITYBAND', value_name='BID')
 
     # Remove the rows where the fcas bid is equal to zero.
-    stacked_bids = remove_gen_bids_with_zero_avail(stacked_bids, ns.col_bid_value)
-
-    # Remove rows where the band number is the FCAS integer variable but the type is energy. These do not exist in
-    # reality and are a by product of the way the variable was added to the data set.
-    stacked_bids = \
-        stacked_bids[(stacked_bids[ns.col_bid_type] != 'ENERGY')
-                     | ((stacked_bids[ns.col_bid_type] == 'ENERGY')
-                        & (stacked_bids[ns.col_capacity_band_number] != ns.col_fcas_integer_variable))].copy()
+    stacked_bids = remove_gen_bids_with_zero_avail(stacked_bids)
 
     # Save the index of each bid.
+    stacked_bids = stacked_bids.sort_values(['DUID', 'CAPACITYBAND'])
     stacked_bids = stacked_bids.reset_index(drop=True)
-    new_col_name = ns.col_variable_index
-    stacked_bids_index = hf.save_index(stacked_bids, new_col_name)
+    stacked_bids_index = hf.save_index(stacked_bids, 'INDEX')
     return stacked_bids_index
 
 
-def create_constraint_row_indexes(bidding_indexes, raw_data, ns) -> pd:
+def create_constraint_row_indexes(bidding_indexes, raw_data, ns):
     # Create the constraint rows needed to model the interaction between FCAS bids and energy bids. This is effectively
     # creating the space in the constraint matrix for the inequality that make up the FCAS availability trapezium.
 
@@ -117,9 +106,9 @@ def create_max_unit_energy_constraints(bidding_indexes, raw_data, max_row_index,
     return indexes_and_constraints_rows
 
 
-def remove_gen_bids_with_zero_avail(gen_bidding_data, avail_col):
+def remove_gen_bids_with_zero_avail(gen_bidding_data):
     # Remove the rows where the max avail is equal to zero.
-    gen_bidding_data = gen_bidding_data[(gen_bidding_data[avail_col] > 0.01)].copy()
+    gen_bidding_data = gen_bidding_data[(gen_bidding_data['BID'] > 0.01)].copy()
     return gen_bidding_data
 
 
