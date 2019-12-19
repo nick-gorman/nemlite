@@ -108,10 +108,11 @@ def create_joint_capacity_constraints_lower(bids_and_indexes, capacity_bids, max
 
 
 def create_joint_ramping_constraints(bids_and_indexes, initial_conditions, max_con, regulation_service, bid_type_check):
-    unique_duids = get_duids_that_joint_ramping_constraints_apply_to(bid_type_check, initial_conditions)
+    unique_duids = get_duids_that_joint_ramping_constraints_apply_to(bid_type_check, initial_conditions,
+                                                                     regulation_service)
     constraint_variables = setup_data_to_calc_joint_ramping_constraints(bids_and_indexes, initial_conditions,
                                                                         unique_duids, regulation_service, max_con)
-    constraint_variables = calc_constraint_values(constraint_variables, regulation_service)
+    constraint_variables = calc_joint_ramping_constraint_values(constraint_variables, regulation_service)
     constraint_variables = \
         constraint_variables.loc[:, ('INDEX', 'ROWINDEX', 'LHSCOEFFICIENTS', 'CONSTRAINTTYPE', 'RHSCONSTANT')]
     return [constraint_variables]
@@ -121,22 +122,25 @@ def get_duids_that_joint_ramping_constraints_apply_to(bid_type_check, initial_co
     units_with_reg_and_energy = \
         bid_type_check[(bid_type_check[regulation_service] == 1) & (bid_type_check['ENERGY'] == 1)]
     unique_duids = units_with_reg_and_energy['DUID'].unique()
-    return unique_duids
+    if regulation_service == 'RAISEREG':
+        units_with_ramp = initial_conditions[initial_conditions['RAMPUPRATE'] > 0.0]['DUID'].unique()
+    else:
+        units_with_ramp = initial_conditions[initial_conditions['RAMPDOWNRATE'] > 0.0]['DUID'].unique()
+    unique_duids = list(unique_duids)
+    units_with_ramp = list(units_with_ramp)
+    return [duid for duid in unique_duids if duid in units_with_ramp]
 
 
-def setup_data_to_calc_joint_ramping_constraints(unique_duids, bids_and_indexes, initial_conditions,
-                                                 regulation_service, max_con):
+def setup_data_to_calc_joint_ramping_constraints(unique_duids, bids_and_indexes, regulation_service, max_con):
     constraint_rows = dict(zip(unique_duids, np.arange(max_con + 1, max_con + 1 + len(unique_duids))))
     applicable_bids = bids_and_indexes[(bids_and_indexes['BIDTYPE'] == 'ENERGY') |
                                        (bids_and_indexes['BIDTYPE'] == regulation_service)]
     constraint_variables = applicable_bids[applicable_bids['DUID'].isin(unique_duids)]
-    initial_conditions = initial_conditions.loc[:, ('DUID', 'INITIALMW', 'RAMPDOWNRATE', 'RAMPUPRATE')]
     constraint_variables['ROWINDEX'] = constraint_variables['DUID'].map(constraint_rows)
-    constraint_variables = pd.merge(constraint_variables, initial_conditions, 'left', 'DUID')
     return constraint_variables
 
 
-def calc_constraint_values(constraint_variables, regulation_service):
+def calc_joint_ramping_constraint_values(constraint_variables, regulation_service):
     if regulation_service == 'RAISEREG':
         constraint_variables['CONSTRAINTTYPE'] = '<='
         constraint_variables['RHSCONSTANT'] = \
@@ -147,7 +151,7 @@ def calc_constraint_values(constraint_variables, regulation_service):
         constraint_variables['RHSCONSTANT'] = \
             constraint_variables['INITIALMW'] - (constraint_variables['RAMPDOWNRATE'] / 12)
         constraint_variables['LHSCOEFFICIENTS'] = np.where(constraint_variables['BIDTYPE'] == 'LOWERREG', -1, 1)
-    return calc_constraint_values
+    return constraint_variables
 
 
 def joint_energy_and_reg_constraints(bids_and_indexes, capacity_bids, max_con, reg_service, bid_type_check):
