@@ -57,25 +57,24 @@ class TestCreateJointRampingConstraints(unittest.TestCase):
             bid_type_check, initial_cons, 'RAISEREG')
         self.assertListEqual(expected_output, output)
 
-    def test_create_constraint_indexes_one_duid(self):
-        duid = ['a', 'a']
-        energy = ['RAISEREG', 'ENERGY']
-        bids_and_indexes = pd.DataFrame({'DUID': duid, 'BIDTYPE': energy})
-        expected_output = bids_and_indexes
-        expected_output['ROWINDEX'] = [1, 1]
-        output = joint_fcas_energy_constraints.setup_data_to_calc_joint_ramping_constraints(
-            ['a'], bids_and_indexes, 'RAISEREG', 0)
-        assert_frame_equal(expected_output, output)
-
     def test_create_constraint_indexes_two_duids(self):
         duid = ['b', 'a', 'a', 'b']
         energy = ['RAISEREG', 'ENERGY', 'RAISEREG', 'ENERGY']
         bids_and_indexes = pd.DataFrame({'DUID': duid, 'BIDTYPE': energy})
-        expected_output = bids_and_indexes
+        initial_conditions = pd.DataFrame({
+            'DUID': ['a', 'b'],
+            'INITIALMW': [11, 12],
+            'RAMPUPRATE': [15, 16],
+            'RAMPDOWNRATE': [13, 14],
+        })
+        expected_output = bids_and_indexes.copy()
+        expected_output['INITIALMW'] = [12, 11, 11, 12]
+        expected_output['RAMPUPRATE'] = [16, 15, 15, 16]
+        expected_output['RAMPDOWNRATE'] = [14, 13, 13, 14]
         expected_output['ROWINDEX'] = [2, 1, 1, 2]
         output = joint_fcas_energy_constraints.setup_data_to_calc_joint_ramping_constraints(
-            ['a', 'b'], bids_and_indexes, 'RAISEREG', 0)
-        assert_frame_equal(expected_output, output)
+            ['a', 'b'], bids_and_indexes, initial_conditions, 'RAISEREG', 0)
+        assert_frame_equal(expected_output.sort_values('DUID', ascending=False).reset_index(drop=True), output)
 
     def test_constraint_value_calcs_raise_reg(self):
         duid = ['b', 'a', 'a', 'b']

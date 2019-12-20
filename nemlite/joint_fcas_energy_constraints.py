@@ -110,8 +110,8 @@ def create_joint_capacity_constraints_lower(bids_and_indexes, capacity_bids, max
 def create_joint_ramping_constraints(bids_and_indexes, initial_conditions, max_con, regulation_service, bid_type_check):
     unique_duids = get_duids_that_joint_ramping_constraints_apply_to(bid_type_check, initial_conditions,
                                                                      regulation_service)
-    constraint_variables = setup_data_to_calc_joint_ramping_constraints(bids_and_indexes, initial_conditions,
-                                                                        unique_duids, regulation_service, max_con)
+    constraint_variables = setup_data_to_calc_joint_ramping_constraints(unique_duids, bids_and_indexes,
+                                                                        initial_conditions, regulation_service, max_con)
     constraint_variables = calc_joint_ramping_constraint_values(constraint_variables, regulation_service)
     constraint_variables = \
         constraint_variables.loc[:, ('INDEX', 'ROWINDEX', 'LHSCOEFFICIENTS', 'CONSTRAINTTYPE', 'RHSCONSTANT')]
@@ -131,11 +131,14 @@ def get_duids_that_joint_ramping_constraints_apply_to(bid_type_check, initial_co
     return [duid for duid in unique_duids if duid in units_with_ramp]
 
 
-def setup_data_to_calc_joint_ramping_constraints(unique_duids, bids_and_indexes, regulation_service, max_con):
+def setup_data_to_calc_joint_ramping_constraints(unique_duids, bids_and_indexes, initial_conditions,
+                                                 regulation_service, max_con):
     constraint_rows = dict(zip(unique_duids, np.arange(max_con + 1, max_con + 1 + len(unique_duids))))
     applicable_bids = bids_and_indexes[(bids_and_indexes['BIDTYPE'] == 'ENERGY') |
                                        (bids_and_indexes['BIDTYPE'] == regulation_service)]
     constraint_variables = applicable_bids[applicable_bids['DUID'].isin(unique_duids)]
+    initial_conditions = initial_conditions.loc[:, ['DUID', 'INITIALMW', 'RAMPUPRATE', 'RAMPDOWNRATE']]
+    constraint_variables = pd.merge(constraint_variables, initial_conditions, on='DUID')
     constraint_variables['ROWINDEX'] = constraint_variables['DUID'].map(constraint_rows)
     return constraint_variables
 
