@@ -135,3 +135,7 @@ class TestCreateJointRampingConstraints(unittest.TestCase):
             bids_and_indexes, initial_conditions, 0, 'RAISEREG', bid_type_check)
         assert_frame_equal(expected_output.sort_values(['INDEX', 'ROWINDEX'], ascending=False).reset_index(drop=True),
                            output[0].sort_values(['INDEX', 'ROWINDEX'], ascending=False).reset_index(drop=True))
+
+
+class TestCreateJointCapacityConstraintsLower(unittest.TestCase):
+    def
