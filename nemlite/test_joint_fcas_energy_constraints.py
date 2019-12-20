@@ -108,3 +108,30 @@ class TestCreateJointRampingConstraints(unittest.TestCase):
         output = joint_fcas_energy_constraints.calc_joint_ramping_constraint_values(bids_and_indexes,
                                                                                     'LOWERREG')
         assert_frame_equal(expected_output, output)
+
+    def test_joint_ramping_end_to_end(self):
+        duid = ['a', 'b']
+        energy = [1.0, 1.0]
+        raise_reg = [1.0, 1.0]
+        bid_type_check = pd.DataFrame({'DUID': duid, 'ENERGY': energy, 'RAISEREG': raise_reg})
+        duid = ['b', 'a', 'a', 'b']
+        energy = ['RAISEREG', 'ENERGY', 'RAISEREG', 'ENERGY']
+        index = [2, 1, 1, 2]
+        bids_and_indexes = pd.DataFrame({'DUID': duid, 'BIDTYPE': energy, 'INDEX': index})
+        initial_conditions = pd.DataFrame({
+            'DUID': ['a', 'b'],
+            'INITIALMW': [11, 12],
+            'RAMPUPRATE': [15, 16],
+            'RAMPDOWNRATE': [13, 14]
+        })
+        expected_output = pd.DataFrame()
+        expected_output['INDEX'] = [2, 1, 1, 2]
+        expected_output['ROWINDEX'] = [2, 1, 1, 2]
+        expected_output['LHSCOEFFICIENTS'] = [1, 1, 1, 1]
+        expected_output['CONSTRAINTTYPE'] = '<='
+        expected_output['RHSCONSTANT'] = [12 + 16/12, 11 + 15/12, 11 + 15/12, 12 + 16/12]
+        expected_output = expected_output.astype(dtype={'RHSCONSTANT': 'float64'})
+        output = joint_fcas_energy_constraints.create_joint_ramping_constraints(
+            bids_and_indexes, initial_conditions, 0, 'RAISEREG', bid_type_check)
+        assert_frame_equal(expected_output.sort_values(['INDEX', 'ROWINDEX'], ascending=False).reset_index(drop=True),
+                           output[0].sort_values(['INDEX', 'ROWINDEX'], ascending=False).reset_index(drop=True))

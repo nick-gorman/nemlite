@@ -36,15 +36,20 @@ def create_joint_capacity_constraints(bids_and_indexes, capacity_bids, initial_c
     return combined_joint_capacity_constraints
 
 
-def create_joint_capacity_constraints_raise(bids_and_indexes, capacity_bids, max_con, raise_contingency_service,
+def create_joint_capacity_constraints_raise(bids_and_indexes, capacity_bids, max_con, contingency_service,
                                             bid_type_check):
-    units_with_reg_or_energy = bid_type_check[(bid_type_check['RAISEREG'] == 1) | (bid_type_check['ENERGY'] == 1)]
-    units_with_raise_contingency = bids_and_indexes[(bids_and_indexes['BIDTYPE'] == raise_contingency_service)]
-    units = set(units_with_reg_or_energy['DUID']).intersection(units_with_raise_contingency['DUID'])
-    units_to_constraint_raise = bids_and_indexes[bids_and_indexes['DUID'].isin(units)]
+    units_with_reg_or_energy = bid_type_check[(bid_type_check[contingency_service] == 1) &
+                                              (bid_type_check['ENERGY'] == 1)]['DUID'].unique()
+    #units_with_raise_contingency = bids_and_indexes[(bids_and_indexes['BIDTYPE'] == raise_contingency_service)]
+    #units = set(units_with_reg_or_energy['DUID']).intersection(units_with_raise_contingency['DUID'])
+    units_to_constraint_raise = bids_and_indexes[bids_and_indexes['DUID'].isin(units_with_reg_or_energy) &
+        ((bids_and_indexes['BIDTYPE'] == 'RAISEREG') |
+         (bids_and_indexes['BIDTYPE'] == 'ENERGY') |
+         (bids_and_indexes['BIDTYPE'] == contingency_service))
+                                                 ()]
     upper_slope_coefficients = capacity_bids.copy()
     upper_slope_coefficients = \
-        upper_slope_coefficients[upper_slope_coefficients['BIDTYPE'] == raise_contingency_service]
+        upper_slope_coefficients[upper_slope_coefficients['BIDTYPE'] == contingency_service]
     upper_slope_coefficients['UPPERSLOPE'] = ((upper_slope_coefficients['ENABLEMENTMAX'] -
                                                upper_slope_coefficients['HIGHBREAKPOINT']) /
                                               upper_slope_coefficients['MAXAVAIL'])
@@ -56,31 +61,32 @@ def create_joint_capacity_constraints_raise(bids_and_indexes, capacity_bids, max
                                                                  'CAPACITYBAND'] != 'FCASINTEGER'),
                                                             1, units_to_constraint_raise['LHSCOEFFICIENTS'])
     units_to_constraint_raise['LHSCOEFFICIENTS'] = \
-        np.where((units_to_constraint_raise['BIDTYPE'] == raise_contingency_service) &
+        np.where((units_to_constraint_raise['BIDTYPE'] == contingency_service) &
                  (units_to_constraint_raise['CAPACITYBAND'] != 'FCASINTEGER'), units_to_constraint_raise['UPPERSLOPE'],
                  units_to_constraint_raise['LHSCOEFFICIENTS'])
     units_to_constraint_raise['RHSCONSTANT'] = units_to_constraint_raise['ENABLEMENTMAX']
     units_to_constraint_raise['CONSTRAINTTYPE'] = '<='
-    constraint_rows = dict(zip(units, np.arange(max_con + 1, max_con + 1 + len(units))))
+    constraint_rows = dict(zip(units_with_reg_or_energy, 
+                               np.arange(max_con + 1, max_con + 1 + len(units_with_reg_or_energy))))
     units_to_constraint_raise['ROWINDEX'] = units_to_constraint_raise['DUID'].map(constraint_rows)
     units_to_constraint_raise = \
         units_to_constraint_raise.loc[:, ('INDEX', 'ROWINDEX', 'LHSCOEFFICIENTS', 'CONSTRAINTTYPE', 'RHSCONSTANT')]
     return [units_to_constraint_raise]
 
 
-def create_joint_capacity_constraints_lower(bids_and_indexes, capacity_bids, max_con, raise_contingency_service,
+def create_joint_capacity_constraints_lower(bids_and_indexes, capacity_bids, max_con, contingency_service,
                                             bid_type_check):
-    units_with_reg_or_energy = bid_type_check[(bid_type_check['LOWERREG'] == 1) | (bid_type_check['ENERGY'] == 1)]
-    units_with_raise_contingency = bids_and_indexes[(bids_and_indexes['BIDTYPE'] == raise_contingency_service)]
+    units_with_reg_or_energy = bid_type_check[(bid_type_check[contingency_service] == 1) &
+                                              (bid_type_check['ENERGY'] == 1)]['DUID'].unique()
+    #units_with_raise_contingency = bids_and_indexes[(bids_and_indexes['BIDTYPE'] == raise_contingency_service)]
     units_to_constraint_raise = bids_and_indexes[
-        (bids_and_indexes['DUID'].isin(list(units_with_reg_or_energy['DUID']))) &
-        (bids_and_indexes['DUID'].isin(list(units_with_raise_contingency['DUID']))) &
+        (bids_and_indexes['DUID'].isin(list(units_with_reg_or_energy))) &
         ((bids_and_indexes['BIDTYPE'] == 'LOWERREG') |
          (bids_and_indexes['BIDTYPE'] == 'ENERGY') |
-         (bids_and_indexes['BIDTYPE'] == raise_contingency_service))]
+         (bids_and_indexes['BIDTYPE'] == contingency_service))]
     upper_slope_coefficients = capacity_bids.copy()
     upper_slope_coefficients = \
-        upper_slope_coefficients[upper_slope_coefficients['BIDTYPE'] == raise_contingency_service]
+        upper_slope_coefficients[upper_slope_coefficients['BIDTYPE'] == contingency_service]
     upper_slope_coefficients['LOWERSLOPE'] = ((upper_slope_coefficients['LOWBREAKPOINT'] -
                                                upper_slope_coefficients['ENABLEMENTMIN']) /
                                               upper_slope_coefficients['MAXAVAIL'])
@@ -93,7 +99,7 @@ def create_joint_capacity_constraints_lower(bids_and_indexes, capacity_bids, max
                                                                  'CAPACITYBAND'] != 'FCASINTEGER'),
                                                             -1, units_to_constraint_raise['LHSCOEFFICIENTS'])
     units_to_constraint_raise['LHSCOEFFICIENTS'] = \
-        np.where((units_to_constraint_raise['BIDTYPE'] == raise_contingency_service) &
+        np.where((units_to_constraint_raise['BIDTYPE'] == contingency_service) &
                  (units_to_constraint_raise['CAPACITYBAND'] != 'FCASINTEGER'),
                  -1 * units_to_constraint_raise['LOWERSLOPE'],
                  units_to_constraint_raise['LHSCOEFFICIENTS'])
