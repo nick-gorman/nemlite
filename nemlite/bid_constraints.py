@@ -60,6 +60,6 @@ def create_constraints(bidding_indexes, capacity_bids, bid_types, max_row_index,
     indexes_and_constraints_rows = indexes_and_constraints_rows.loc[:, ['INDEX', 'ROWINDEX', 'DUID', 'ENABLEMENTTYPE',
                                                                         'BIDTYPE', 'RHSCONSTANT']]
     indexes_and_constraints_rows['LHSCOEFFICIENTS'] = 1
-    indexes_and_constraints_rows['ENQUALITYTYPE'] = direction
+    indexes_and_constraints_rows['CONSTRAINTTYPE'] = direction
     return indexes_and_constraints_rows
 

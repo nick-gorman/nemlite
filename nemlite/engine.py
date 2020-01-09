@@ -170,10 +170,8 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
 
 
     # List of inequality types.
-    rhs_and_inequality_types = create_inequality_types(bidding_constraints, region_req_by_row, type_and_rhs,
-                                               inter_seg_dispatch_order_constraints,
-                                               joint_capacity_constraints,
-                                               ns)
+    rhs_and_inequality_types = create_inequality_types([bidding_constraints, region_req_by_row, type_and_rhs,
+                                                        joint_capacity_constraints], ns)
 
     return combined_constraints, rhs_and_inequality_types, objective_coefficients, bid_variable_data, \
            req_row_indexes_coefficients_for_inter, region_req_by_row,
@@ -357,6 +355,7 @@ def create_region_req_contribution_to_constraint_matrix(latest_region_req, start
     # Change the naming of columns to match those use for generator bidding constraints. Allows the constraints to
     # be processed together later on.
     region_req_by_row = change_req_naming_to_bid_naming(region_req_by_row, ns)
+    region_req_by_row['CONSTRAINTTYPE'] = '='
     return region_req_by_row
 
 
@@ -908,46 +907,16 @@ def rhs_coefficients_in_tuple(list_data_sets, ns):
     return combined_rhs_data
 
 
-def create_inequality_types(bids, region_req, generic_type, inter_seg_dispatch_order_constraints,
-                            joint_capacity_constraints, ns):
+def create_inequality_types(constraint_sets, ns):
     # For each constraint row determine the inequality type and save in a list of ascending order according to row
     # index.
-
-    # Process bidding constraints.
-    bids = bids.drop_duplicates(subset=[ns.col_constraint_row_index]).copy()
-    bids[ns.col_enquality_type] = np.where(bids['ENQUALITYTYPE'] == '>=', 'equal_or_greater', 'equal_or_less')
-    # Process region requirement constraints.
-    region_req[ns.col_enquality_type] = 'equal'
-    region_req = region_req.loc[:, (ns.col_constraint_row_index, ns.col_enquality_type, ns.col_rhs_constant)].copy()
-    # Process generic constraints.
-    generic_type[ns.col_enquality_type] = np.where(generic_type['CONSTRAINTTYPE'] == '>=', 'equal_or_greater', '')
-    generic_type[ns.col_enquality_type] = np.where(generic_type['CONSTRAINTTYPE'] == '<=', 'equal_or_less',
-                                                   generic_type[ns.col_enquality_type])
-    generic_type[ns.col_enquality_type] = np.where(generic_type['CONSTRAINTTYPE'] == '=', 'equal',
-                                                   generic_type[ns.col_enquality_type])
-
-    # Process interconnector segments constraints.
-    inter_seg_dispatch_order_constraints = inter_seg_dispatch_order_constraints.drop_duplicates(
-        subset=[ns.col_constraint_row_index]).copy()
-    inter_seg_dispatch_order_constraints[ns.col_enquality_type] = 'equal_or_less'
-    inter_seg_dispatch_order_constraints = inter_seg_dispatch_order_constraints.loc[:,
-                                           (ns.col_constraint_row_index, ns.col_enquality_type, ns.col_rhs_constant)].copy()
-    # Process joint capacity constraints.
-    joint_capacity_constraints = joint_capacity_constraints.drop_duplicates(
-        subset=[ns.col_constraint_row_index]).copy()
-    joint_capacity_constraints[ns.col_enquality_type] = \
-        np.where(joint_capacity_constraints['CONSTRAINTTYPE'] == '>=', 'equal_or_greater', '')
-    joint_capacity_constraints[ns.col_enquality_type] = \
-        np.where(joint_capacity_constraints['CONSTRAINTTYPE'] == '<=', 'equal_or_less',
-                 joint_capacity_constraints[ns.col_enquality_type])
-    joint_capacity_constraints[ns.col_enquality_type] = \
-        np.where(joint_capacity_constraints['CONSTRAINTTYPE'] == '=', 'equal',
-                 joint_capacity_constraints[ns.col_enquality_type])
-
+    processed_sets = []
+    for constraint_set in constraint_sets:
+        constraint_set = constraint_set.drop_duplicates(subset=[ns.col_constraint_row_index]).copy()
+        constraint_set = constraint_set.loc[:, (ns.col_constraint_row_index, 'CONSTRAINTTYPE', ns.col_rhs_constant)]
+        processed_sets.append(constraint_set)
     # Combine type data, sort by row index and convert to type list.
-    combined_type_data = pd.concat([bids, region_req, generic_type,
-                                    # inter_seg_dispatch_order_constraints,
-                                    joint_capacity_constraints], sort=False)
+    combined_type_data = pd.concat(processed_sets, sort=False)
     #combined_type_data = combined_type_data.sort_values([ns.col_constraint_row_index], ascending=True)
     #combined_type_data = list(combined_type_data[ns.col_enquality_type])
     return combined_type_data
