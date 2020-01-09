@@ -15,7 +15,7 @@ def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditio
         market_cap_and_floor):
     # Create an object that holds the AEMO names for data table column names.
     ns = dn.declare_names()
-
+    #dummy
     # Initialise list to store results.
     results_datetime = []
     results_service = []
