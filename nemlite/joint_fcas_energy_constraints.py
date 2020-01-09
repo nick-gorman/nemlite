@@ -4,7 +4,7 @@ import numpy as np
 
 
 def create_joint_capacity_constraints(bids_and_indexes, capacity_bids, initial_conditions, max_con):
-    # Pre calculate at table that allows for the efficient selection of generators according to which markets they are
+    # Pre calculate a table that allows for the efficient selection of generators according to which markets they are
     # bidding into
     bid_type_check = bids_and_indexes.copy()
     bid_type_check = bid_type_check.loc[:, ('DUID', 'BIDTYPE')]
@@ -14,11 +14,14 @@ def create_joint_capacity_constraints(bids_and_indexes, capacity_bids, initial_c
     bid_type_check = bid_type_check.fillna(0)
     bid_type_check['DUID'] = bid_type_check.index
     combined_joint_capacity_constraints = []
+
+    # Create constraint sets
     for fcas_service in ['RAISE6SEC', 'RAISE60SEC', 'RAISE5MIN', 'LOWER6SEC', 'LOWER60SEC', 'LOWER5MIN',
                          'LOWERREG', 'RAISEREG']:
         if fcas_service in ['RAISE6SEC', 'RAISE60SEC', 'RAISE5MIN', 'LOWER6SEC', 'LOWER60SEC', 'LOWER5MIN']:
-            joint_constraints1 = create_joint_capacity_constraints_raise(bids_and_indexes.copy(), capacity_bids.copy(),
-                                                                         max_con, fcas_service, bid_type_check)
+            joint_constraints1 = create_joint_capacity_constraints_upper_slope(bids_and_indexes.copy(),
+                                                                               capacity_bids.copy(), max_con,
+                                                                               fcas_service, bid_type_check)
             max_con = hf.max_constraint_index(joint_constraints1[0])
             joint_constraints2 = create_joint_capacity_constraints_lower_slope(bids_and_indexes.copy(),
                                                                                capacity_bids.copy(), max_con,
@@ -34,13 +37,15 @@ def create_joint_capacity_constraints(bids_and_indexes, capacity_bids, initial_c
 
         max_con = hf.max_constraint_index(joint_constraints[-1])
         combined_joint_capacity_constraints += joint_constraints
+
+    # Combine constraint sets into single dataframe
     combined_joint_capacity_constraints = pd.concat(combined_joint_capacity_constraints)
     return combined_joint_capacity_constraints
 
 
-def create_joint_capacity_constraints_raise(bids_and_indexes, capacity_bids, max_con, contingency_service,
-                                            bid_type_check):
-    units_to_constraint, duids = get_units_to_constraint_joint_capacity(bid_type_check, bids_and_indexes,
+def create_joint_capacity_constraints_upper_slope(bids_and_indexes, capacity_bids, max_con, contingency_service,
+                                                  bid_type_check):
+    units_to_constraint, duids = get_units_to_constrain_joint_capacity(bid_type_check, bids_and_indexes,
                                                                         contingency_service, 'RAISEREG')
     upper_slope_coefficients = calc_slope_joint_capacity_upper(capacity_bids.copy(), contingency_service)
     units_to_constraint = define_joint_capacity_constraint_values_upper_slope(units_to_constraint,
@@ -51,7 +56,7 @@ def create_joint_capacity_constraints_raise(bids_and_indexes, capacity_bids, max
 
 def create_joint_capacity_constraints_lower_slope(bids_and_indexes, capacity_bids, max_con, contingency_service,
                                                   bid_type_check):
-    units_to_constraint, duids = get_units_to_constraint_joint_capacity(bid_type_check, bids_and_indexes,
+    units_to_constraint, duids = get_units_to_constrain_joint_capacity(bid_type_check, bids_and_indexes,
                                                                         contingency_service, 'LOWERREG')
     lower_slope_coefficients = calc_slope_joint_capacity_lower(capacity_bids.copy(), contingency_service)
     units_to_constraint = define_joint_capacity_constraint_values_lower_slope(units_to_constraint,
@@ -60,7 +65,7 @@ def create_joint_capacity_constraints_lower_slope(bids_and_indexes, capacity_bid
     return [units_to_constraint]
 
 
-def get_units_to_constraint_joint_capacity(bid_type_check, bids_and_indexes, contingency_service, reg_pair):
+def get_units_to_constrain_joint_capacity(bid_type_check, bids_and_indexes, contingency_service, reg_pair):
     units_with_con_and_energy = bid_type_check[(bid_type_check[contingency_service] == 1) &
                                                (bid_type_check['ENERGY'] == 1)]['DUID'].unique()
     units_to_constraint_raise = bids_and_indexes[
@@ -72,7 +77,7 @@ def get_units_to_constraint_joint_capacity(bid_type_check, bids_and_indexes, con
 
 
 def set_row_index(units_to_constraint, duids, max_con):
-    constraint_rows = dict(zip(unique_duids, np.arange(max_con + 1, max_con + 1 + len(duids))))
+    constraint_rows = dict(zip(duids, np.arange(max_con + 1, max_con + 1 + len(duids))))
     units_to_constraint['ROWINDEX'] = units_to_constraint['DUID'].map(constraint_rows)
     units_to_constraint = units_to_constraint.loc[:,
                           ['INDEX', 'ROWINDEX', 'LHSCOEFFICIENTS', 'CONSTRAINTTYPE', 'RHSCONSTANT']]
@@ -82,7 +87,7 @@ def set_row_index(units_to_constraint, duids, max_con):
 def define_joint_capacity_constraint_values_upper_slope(units_to_constraint, upper_slope_coefficients):
     units_to_constraint = pd.merge(units_to_constraint, upper_slope_coefficients, 'left', 'DUID')
     units_to_constraint['LHSCOEFFICIENTS'] = 1
-    units_to_constraint['LHSCOEFFICIENTS'] = np.where(units_to_constraint['BIDTYPE'] == contingency_service,
+    units_to_constraint['LHSCOEFFICIENTS'] = np.where(~units_to_constraint['BIDTYPE'].isin(['ENERGY', 'RAISEREG']),
                                                       units_to_constraint['UPPERSLOPE'],
                                                       units_to_constraint['LHSCOEFFICIENTS'])
     units_to_constraint['RHSCONSTANT'] = units_to_constraint['ENABLEMENTMAX']
@@ -94,13 +99,13 @@ def define_joint_capacity_constraint_values_lower_slope(units_to_constraint, low
     units_to_constraint = pd.merge(units_to_constraint, lower_slope_coefficients, 'left', 'DUID')
     units_to_constraint['LHSCOEFFICIENTS'] = 1
     units_to_constraint['LHSCOEFFICIENTS'] = np.where((units_to_constraint['BIDTYPE'] == 'LOWERREG'),
-                                                     -1, units_to_constraint['LHSCOEFFICIENTS'])
+                                                      -1, units_to_constraint['LHSCOEFFICIENTS'])
     units_to_constraint['LHSCOEFFICIENTS'] = np.where(
-        units_to_constraint['BIDTYPE'] == contingency_service, -1 * units_to_constraint['LOWERSLOPE'],
+        ~units_to_constraint['BIDTYPE'].isin(['ENERGY', 'LOWERREG']), -1 * units_to_constraint['LOWERSLOPE'],
         units_to_constraint['LHSCOEFFICIENTS'])
     units_to_constraint['RHSCONSTANT'] = units_to_constraint['ENABLEMENTMIN']
     units_to_constraint['CONSTRAINTTYPE'] = '>='
-    return units_to_constraint_raise
+    return units_to_constraint
 
 
 def calc_slope_joint_capacity_lower(capacity_bids, contingency_service):
@@ -172,11 +177,28 @@ def calc_joint_ramping_constraint_values(constraint_variables, regulation_servic
 
 
 def joint_energy_and_reg_constraints(bids_and_indexes, capacity_bids, max_con, reg_service, bid_type_check):
+    constraint_variables, units = \
+        joint_energy_and_reg_get_units_to_constrain(bids_and_indexes, reg_service, bid_type_check)
+    slope_coefficients = joint_energy_and_reg_slope_coefficients(capacity_bids, reg_service, units)
+    constraint_variables = pd.merge(constraint_variables, slope_coefficients, 'left', on='DUID')
+    units_to_constraint_upper = \
+        joint_energy_and_reg_upper_slope_constraints(constraint_variables, reg_service, max_con)
+    max_con = hf.max_constraint_index(units_to_constraint_upper)
+    units_to_constraint_lower = \
+        joint_energy_and_reg_lower_slope_constraints(constraint_variables, reg_service, max_con)
+    return [units_to_constraint_upper, units_to_constraint_lower]
+
+
+def joint_energy_and_reg_get_units_to_constrain(bids_and_indexes, reg_service, bid_type_check):
     units_with_reg_and_energy = bid_type_check[(bid_type_check[reg_service] == 1) & (bid_type_check['ENERGY'] == 1)]
     units = list(units_with_reg_and_energy['DUID'])
     constraint_variables = bids_and_indexes[(bids_and_indexes['DUID'].isin(units) &
                                              ((bids_and_indexes['BIDTYPE'] == 'ENERGY') |
                                               (bids_and_indexes['BIDTYPE'] == reg_service)))].copy()
+    return constraint_variables, units
+
+
+def joint_energy_and_reg_slope_coefficients(capacity_bids, reg_service, units):
     slope_coefficients = capacity_bids[(capacity_bids['BIDTYPE'] == reg_service) &
                                        (capacity_bids['DUID'].isin(units))].copy()
     slope_coefficients['UPPERSLOPE'] = ((slope_coefficients['ENABLEMENTMAX'] - slope_coefficients['HIGHBREAKPOINT']) /
@@ -185,7 +207,10 @@ def joint_energy_and_reg_constraints(bids_and_indexes, capacity_bids, max_con, r
                                         slope_coefficients['MAXAVAIL'])
     slope_coefficients = \
         slope_coefficients.loc[:, ['DUID', 'UPPERSLOPE', 'LOWERSLOPE', 'ENABLEMENTMAX', 'ENABLEMENTMIN']]
-    constraint_variables = pd.merge(constraint_variables, slope_coefficients, 'left', on='DUID')
+    return slope_coefficients
+
+
+def joint_energy_and_reg_upper_slope_constraints(constraint_variables, reg_service, max_con):
     units_to_constraint_upper = constraint_variables.copy()
     units_to_constraint_upper['LHSCOEFFICIENTS'] = np.where((units_to_constraint_upper['BIDTYPE'] == reg_service),
                                                             units_to_constraint_upper['UPPERSLOPE'], 1)
@@ -193,18 +218,22 @@ def joint_energy_and_reg_constraints(bids_and_indexes, capacity_bids, max_con, r
     units_to_constraint_upper['CONSTRAINTTYPE'] = '<='
     unique_duids = units_to_constraint_upper['DUID'].unique()
     units_to_constraint_upper_rows = dict(zip(unique_duids, np.arange(max_con + 1, max_con + 1 + len(unique_duids))))
+    units_to_constraint_upper['ROWINDEX'] = units_to_constraint_upper['DUID'].map(units_to_constraint_upper_rows)
+    units_to_constraint_upper = \
+        units_to_constraint_upper[['INDEX', 'ROWINDEX', 'LHSCOEFFICIENTS', 'CONSTRAINTTYPE', 'RHSCONSTANT']]
+    return units_to_constraint_upper
+
+
+def joint_energy_and_reg_lower_slope_constraints(constraint_variables, reg_service, max_con):
     units_to_constraint_lower = constraint_variables.copy()
     units_to_constraint_lower['LHSCOEFFICIENTS'] = np.where((units_to_constraint_lower['BIDTYPE'] == reg_service),
                                                             -1 * units_to_constraint_lower['LOWERSLOPE'], 1)
     units_to_constraint_lower['RHSCONSTANT'] = units_to_constraint_lower['ENABLEMENTMIN']
     units_to_constraint_lower['CONSTRAINTTYPE'] = '>='
-    units_to_constraint_upper['ROWINDEX'] = units_to_constraint_upper['DUID'].map(units_to_constraint_upper_rows)
-    max_con = hf.max_constraint_index(units_to_constraint_upper)
+
     unique_duids = units_to_constraint_lower['DUID'].unique()
     units_to_constraint_lower_rows = dict(zip(unique_duids, np.arange(max_con + 1, max_con + 1 + len(unique_duids))))
     units_to_constraint_lower['ROWINDEX'] = units_to_constraint_lower['DUID'].map(units_to_constraint_lower_rows)
     units_to_constraint_lower = \
         units_to_constraint_lower[['INDEX', 'ROWINDEX', 'LHSCOEFFICIENTS', 'CONSTRAINTTYPE', 'RHSCONSTANT']]
-    units_to_constraint_upper = \
-        units_to_constraint_upper[['INDEX', 'ROWINDEX', 'LHSCOEFFICIENTS', 'CONSTRAINTTYPE', 'RHSCONSTANT']]
-    return [units_to_constraint_upper, units_to_constraint_lower]
+    return units_to_constraint_lower

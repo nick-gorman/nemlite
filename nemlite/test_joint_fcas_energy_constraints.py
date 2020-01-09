@@ -137,5 +137,211 @@ class TestCreateJointRampingConstraints(unittest.TestCase):
                            output[0].sort_values(['INDEX', 'ROWINDEX'], ascending=False).reset_index(drop=True))
 
 
-class TestCreateJointCapacityConstraintsLower(unittest.TestCase):
-    def
+class TestCreateJointCapacityConstraints(unittest.TestCase):
+    def test_get_unit_to_constrain_joint_capacity(self):
+        bid_type_check = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+            'ENERGY': [1, 1, 0, 1, 0, 1, 0],
+            'LOWERREG': [1, 1, 1, 0, 0, 0, 1],
+            'LOWERCON': [1, 0, 1, 1, 1, 0, 0]
+        })
+        bids_and_indexes = pd.DataFrame({
+            'DUID': ['A', 'A', 'A', 'B', 'B', 'C', 'C', 'D', 'D', 'E', 'F', 'G'],
+            'BIDTYPE': ['ENERGY', 'LOWERREG', 'LOWERCON', 'ENERGY', 'LOWERREG', 'LOWERREG', 'LOWERCON', 'ENERGY',
+                        'LOWERCON', 'LOWERCON', 'ENEGRY', 'LOWERREG']
+        })
+        expected_output = pd.DataFrame({
+            'DUID': ['A', 'A', 'A', 'D', 'D'],
+            'BIDTYPE': ['ENERGY', 'LOWERREG', 'LOWERCON', 'ENERGY', 'LOWERCON']
+        })
+        output_frame, duid_list = joint_fcas_energy_constraints.get_units_to_constrain_joint_capacity(
+            bid_type_check, bids_and_indexes, 'LOWERCON', 'LOWERREG')
+        assert_frame_equal(expected_output.reset_index(drop=True), output_frame.reset_index(drop=True))
+        self.assertListEqual(['A', 'D'], list(duid_list))
+
+    def test_set_rows(self):
+        units_to_constrain = pd.DataFrame({
+            'DUID': ['X1', 'X1', 'X2'],
+            'INDEX': [1, 2, 3],
+            'BIDTYPE': ['ENERGY', 'LOWERREG', 'LOWERCON'],
+            'LOWERSLOPE': [0.1, 0.1, 0.1],
+            'ENABLEMENTMIN': [0, 0, 0],
+            'LHSCOEFFICIENTS': [1.0, -1.0, -0.1],
+            'RHSCONSTANT': [0, 0, 0],
+            'CONSTRAINTTYPE': ['>=', '>=', '>=']
+        })
+        duids = ['X1', 'X2']
+        max_con = 0
+        expected_output = pd.DataFrame({
+            'INDEX': [1, 2, 3],
+            'ROWINDEX': [1, 1, 2],
+            'LHSCOEFFICIENTS': [1.0, -1.0, -0.1],
+            'CONSTRAINTTYPE': ['>=', '>=', '>='],
+            'RHSCONSTANT': [0, 0, 0]
+        })
+        output = joint_fcas_energy_constraints.set_row_index(units_to_constrain, duids, max_con)
+        assert_frame_equal(expected_output.reset_index(drop=True), output.reset_index(drop=True))
+
+
+class TestCreateJointCapacityConstraintsLowerSlope(unittest.TestCase):
+    def test_calc_slope(self):
+        input = pd.DataFrame({
+            'DUID': ['X1', 'X1'],
+            'BIDTYPE': ['A', 'D'],
+            'LOWBREAKPOINT': [1, 1],
+            'ENABLEMENTMIN': [0, 0],
+            'MAXAVAIL': [10, 20]
+        })
+        expected_output = pd.DataFrame({
+            'DUID': ['X1'],
+            'LOWERSLOPE': [0.1],
+            'ENABLEMENTMIN': [0]
+        })
+        output = joint_fcas_energy_constraints.calc_slope_joint_capacity_lower(input, 'A')
+        assert_frame_equal(expected_output.reset_index(drop=True), output.reset_index(drop=True))
+
+    def test_define_constraint_values_lower_slope(self):
+        lower_slope_cofficients = pd.DataFrame({
+            'DUID': ['X1'],
+            'LOWERSLOPE': [0.1],
+            'ENABLEMENTMIN': [0]
+        })
+        unit_to_constraint = pd.DataFrame({
+            'DUID': ['X1', 'X1', 'X1'],
+            'BIDTYPE': ['ENERGY', 'LOWERREG', 'LOWERCON']
+        })
+        expected_output = pd.DataFrame({
+            'DUID': ['X1', 'X1', 'X1'],
+            'BIDTYPE': ['ENERGY', 'LOWERREG', 'LOWERCON'],
+            'LOWERSLOPE': [0.1, 0.1, 0.1],
+            'ENABLEMENTMIN': [0, 0, 0],
+            'LHSCOEFFICIENTS': [1.0, -1.0, -0.1],
+            'RHSCONSTANT': [0, 0, 0],
+            'CONSTRAINTTYPE': ['>=', '>=', '>=']
+        })
+        output = joint_fcas_energy_constraints.define_joint_capacity_constraint_values_lower_slope(
+            unit_to_constraint, lower_slope_cofficients)
+        assert_frame_equal(expected_output.reset_index(drop=True), output.reset_index(drop=True))
+
+
+class TestCreateJointCapacityConstraintsUpperSlope(unittest.TestCase):
+    def test_calc_slope(self):
+        input = pd.DataFrame({
+            'DUID': ['X1', 'X1'],
+            'BIDTYPE': ['A', 'D'],
+            'HIGHBREAKPOINT': [1, 1],
+            'ENABLEMENTMAX': [0, 0],
+            'MAXAVAIL': [10, 20]
+        })
+        expected_output = pd.DataFrame({
+            'DUID': ['X1'],
+            'UPPERSLOPE': [-0.1],
+            'ENABLEMENTMAX': [0]
+        })
+        output = joint_fcas_energy_constraints.calc_slope_joint_capacity_upper(input, 'A')
+        assert_frame_equal(expected_output.reset_index(drop=True), output.reset_index(drop=True))
+
+    def test_define_constraint_values_upper_slope(self):
+        upper_slope_cofficients = pd.DataFrame({
+            'DUID': ['X1'],
+            'UPPERSLOPE': [0.1],
+            'ENABLEMENTMAX': [0]
+        })
+        unit_to_constraint = pd.DataFrame({
+            'DUID': ['X1', 'X1', 'X1'],
+            'BIDTYPE': ['ENERGY', 'RAISEREG', 'RAISECON']
+        })
+        expected_output = pd.DataFrame({
+            'DUID': ['X1', 'X1', 'X1'],
+            'BIDTYPE': ['ENERGY', 'RAISEREG', 'RAISECON'],
+            'UPPERSLOPE': [0.1, 0.1, 0.1],
+            'ENABLEMENTMAX': [0, 0, 0],
+            'LHSCOEFFICIENTS': [1.0,  1.0, 0.1],
+            'RHSCONSTANT': [0, 0, 0],
+            'CONSTRAINTTYPE': ['<=', '<=', '<=']
+        })
+        output = joint_fcas_energy_constraints.define_joint_capacity_constraint_values_upper_slope(
+            unit_to_constraint, upper_slope_cofficients)
+        assert_frame_equal(expected_output.reset_index(drop=True), output.reset_index(drop=True))
+
+
+class TestJointEnergyAndRegConstraints(unittest.TestCase):
+    def test_joint_energy_and_reg_get_units_to_constrain(self):
+        bid_type_check = pd.DataFrame({
+            'DUID': ['A', 'B', 'C'],
+            'ENERGY': [1, 1, 0],
+            'LOWERREG': [1, 0, 1],
+        })
+        bids_and_indexes = pd.DataFrame({
+            'DUID': ['A', 'A', 'B', 'C'],
+            'BIDTYPE': ['ENERGY', 'LOWERREG', 'ENERGY', 'LOWERREG']
+        })
+        expected_output = pd.DataFrame({
+            'DUID': ['A', 'A'],
+            'BIDTYPE': ['ENERGY', 'LOWERREG']
+        })
+        output_frame, duid_list = joint_fcas_energy_constraints.joint_energy_and_reg_get_units_to_constrain(
+            bids_and_indexes, 'LOWERREG', bid_type_check)
+        assert_frame_equal(expected_output.reset_index(drop=True), output_frame.reset_index(drop=True))
+        self.assertListEqual(['A'], list(duid_list))
+
+    def test_calc_slope(self):
+        input = pd.DataFrame({
+            'DUID': ['X1', 'X1'],
+            'BIDTYPE': ['A', 'D'],
+            'LOWBREAKPOINT': [1, 1],
+            'ENABLEMENTMIN': [0, 0],
+            'HIGHBREAKPOINT': [1, 1],
+            'ENABLEMENTMAX': [0, 0],
+            'MAXAVAIL': [10, 20]
+        })
+        expected_output = pd.DataFrame({
+            'DUID': ['X1'],
+            'UPPERSLOPE': [-0.1],
+            'LOWERSLOPE': [0.1],
+            'ENABLEMENTMAX': [0],
+            'ENABLEMENTMIN': [0]
+        })
+        output = joint_fcas_energy_constraints.joint_energy_and_reg_slope_coefficients(input, 'A', ['X1'])
+        assert_frame_equal(expected_output.reset_index(drop=True), output.reset_index(drop=True))
+
+    def test_define_constraint_values_upper_slope(self):
+        unit_to_constraint = pd.DataFrame({
+            'DUID': ['X1', 'X1'],
+            'INDEX': [1, 2],
+            'BIDTYPE': ['ENERGY', 'RAISEREG'],
+            'UPPERSLOPE': [0.1, 0.1],
+            'ENABLEMENTMAX': [0, 0]
+        })
+        expected_output = pd.DataFrame({
+            'INDEX': [1, 2],
+            'ROWINDEX': [1, 1],
+            'LHSCOEFFICIENTS': [1.0,  0.1],
+            'CONSTRAINTTYPE': ['<=', '<='],
+            'RHSCONSTANT': [0, 0]
+
+        })
+        output = joint_fcas_energy_constraints.joint_energy_and_reg_upper_slope_constraints(
+            unit_to_constraint, 'RAISEREG', 0)
+        assert_frame_equal(expected_output.reset_index(drop=True), output.reset_index(drop=True))
+
+    def test_define_constraint_values_lower_slope(self):
+        unit_to_constraint = pd.DataFrame({
+            'DUID': ['X1', 'X1'],
+            'INDEX': [1, 2],
+            'BIDTYPE': ['ENERGY', 'LOWERREG'],
+            'LOWERSLOPE': [0.1, 0.1],
+            'ENABLEMENTMIN': [0, 0]
+        })
+        expected_output = pd.DataFrame({
+            'INDEX': [1, 2],
+            'ROWINDEX': [1, 1],
+            'LHSCOEFFICIENTS': [1.0,  -0.1],
+            'CONSTRAINTTYPE': ['>=', '>='],
+            'RHSCONSTANT': [0, 0]
+
+        })
+        output = joint_fcas_energy_constraints.joint_energy_and_reg_lower_slope_constraints(
+            unit_to_constraint, 'LOWERREG', 0)
+        assert_frame_equal(expected_output.reset_index(drop=True), output.reset_index(drop=True))
+
