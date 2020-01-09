@@ -43,7 +43,7 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
     constraint_matrix = np.asarray(constraint_matrix)
     # constraint_dict = {g: s.tolist() for g, s in combined_constraints['LHSCOEFFICIENTSVARS'].groupby('ROWINDEX')}
     rhs = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['RHSCONSTANT']))
-    enq_type = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['CONSTRAINTTYPE']))
+    enq_type = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['ENQUALITYTYPE']))
     var_list = np.asarray([v for k, v in variables.items()])
     for i in range(len(row_indices)):
         # Record the mapping between the index used to name a constraint internally to the pulp code and the row
@@ -118,11 +118,11 @@ def make_constraint(var_list, lhs, rhs, enq_type, marginal_offset=0):
     exp = exp.tolist()
     exp = xsum(exp)
     # Add based on inequality type.
-    if enq_type == '<=':
+    if enq_type == 'equal_or_less':
         con = exp <= rhs + marginal_offset
-    elif enq_type == '>=':
+    elif enq_type == 'equal_or_greater':
         con = exp >= rhs + marginal_offset
-    elif enq_type == '=':
+    elif enq_type == 'equal':
         con = exp == rhs + marginal_offset
     else:
         print('missing types')
