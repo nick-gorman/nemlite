@@ -3,28 +3,22 @@ import numpy as np
 from nemlite import helper_functions as hf
 
 
-def index_inter(inter_info, inter_seg_definitions, max_index, ns):
+def index_inter(inter_info, inter_seg_definitions, max_index):
     # Create a direction for each interconnector.
-    cols_to_keep = [ns.col_inter_id]
-    cols_to_stack = [ns.col_region_from, ns.col_region_to]
-    type_name = ns.col_direction
-    value_name = ns.col_region_id
+    cols_to_keep = ['INTERCONNECTORID']
+    cols_to_stack = ['REGIONFROM', 'REGIONTO']
+    type_name = 'DIRECTION'
+    value_name = 'REGIONID'
     stacked_inter_directions = hf.stack_columns(inter_info, cols_to_keep, cols_to_stack, type_name, value_name)
     stacked_inter_directions['DUMMYJOIN'] = 1
 
-    # Create a separate interconnector type for each FCAS type.
-    fcas_services = pd.DataFrame()
-    fcas_services[ns.col_bid_type] = ns.list_fcas_types
-    fcas_services['LOSSSEGMENT'] = 1
-    fcas_services['DUMMYJOIN'] = 1
-
     # Create an interconnector type for energy.
     energy_services = pd.DataFrame()
-    energy_services[ns.col_bid_type] = [ns.type_energy]
+    energy_services['BIDTYPE'] = ['ENERGY']
     energy_services['DUMMYJOIN'] = 1
 
     # Select just the interconnector segment data we need.
-    inter_segments = inter_seg_definitions.loc[:, (ns.col_inter_id, 'LOSSSEGMENT', 'MWBREAKPOINT')]
+    inter_segments = inter_seg_definitions.loc[:, ('INTERCONNECTORID', 'LOSSSEGMENT', 'MWBREAKPOINT')]
     # Beak segments for positive flow and negative flow into different groups.
     pos_inter_segments = inter_segments[inter_segments['MWBREAKPOINT'] >= 0]
     neg_inter_segments = inter_segments[inter_segments['MWBREAKPOINT'] < 0]
@@ -34,30 +28,30 @@ def index_inter(inter_info, inter_seg_definitions, max_index, ns):
     # Merge interconnector from directions with positive flow segments to create the segments needed for the from
     # direction.
     pos_inter_multiplied_by_energy_types = pd.merge(
-        inter_multiplied_by_energy_types[inter_multiplied_by_energy_types[ns.col_direction] == ns.col_region_from],
-        pos_inter_segments, 'inner', [ns.col_inter_id])
+        inter_multiplied_by_energy_types[inter_multiplied_by_energy_types['DIRECTION'] == 'REGIONFROM'],
+        pos_inter_segments, 'inner', ['INTERCONNECTORID'])
     # Merge interconnector to directions with negative flow segments to create the segments needed for the to
     # direction.
     neg_inter_multiplied_by_energy_types = pd.merge(
-        inter_multiplied_by_energy_types[inter_multiplied_by_energy_types[ns.col_direction] == ns.col_region_to],
-        neg_inter_segments, 'inner', [ns.col_inter_id])
+        inter_multiplied_by_energy_types[inter_multiplied_by_energy_types['DIRECTION'] == 'REGIONTO'],
+        neg_inter_segments, 'inner', ['INTERCONNECTORID'])
 
     # Combine pos and negative segments into one dataframe.
     inter_multiplied_by_energy_types = pd.concat([pos_inter_multiplied_by_energy_types,
                                                   neg_inter_multiplied_by_energy_types])
 
     # Sort values so indexing occurs in a logical sequence.
-    inter_multiplied_by_types = inter_multiplied_by_energy_types.sort_values([ns.col_inter_id, ns.col_direction,
-                                                                              ns.col_bid_type, 'LOSSSEGMENT'])
+    inter_multiplied_by_types = inter_multiplied_by_energy_types.sort_values(['INTERCONNECTORID', 'DIRECTION',
+                                                                              'BIDTYPE', 'LOSSSEGMENT'])
     # Create interconnector variable indexes.
     inter_multiplied_by_types = inter_multiplied_by_types.reset_index(drop=True)
-    inter_multiplied_by_types = hf.save_index(inter_multiplied_by_types, ns.col_variable_index, max_index + 1)
+    inter_multiplied_by_types = hf.save_index(inter_multiplied_by_types, 'INDEX', max_index + 1)
     # Delete dummy column used for joining data.
     inter_multiplied_by_types = inter_multiplied_by_types.drop('DUMMYJOIN', 1)
     return inter_multiplied_by_types
 
 
-def add_inter_bounds(inter_variable_indexes, inter_seg_definitions, ns):
+def add_inter_bounds(inter_variable_indexes, inter_seg_definitions):
     # Take the actual break point of each interconnector segment and store in series form.
     actual_break_points = inter_seg_definitions['MWBREAKPOINT']
 
@@ -74,11 +68,11 @@ def add_inter_bounds(inter_variable_indexes, inter_seg_definitions, ns):
     lower_break_points = inter_segs_lower['MWBREAKPOINT']
 
     # Find the absolute power flow limit of each segment and its mean absolute value.
-    inter_seg_definitions[ns.col_upper_bound], inter_seg_definitions['MEANVALUE'] \
+    inter_seg_definitions['UPPERBOUND'], inter_seg_definitions['MEANVALUE'] \
         = np.vectorize(calc_bound_for_segment)(actual_break_points, high_break_points, lower_break_points)
 
     # Map the results back to the interconnector variable indexes.
-    seg_results = inter_seg_definitions.loc[:, ('INTERCONNECTORID', 'LOSSSEGMENT', 'MEANVALUE', ns.col_upper_bound)]
+    seg_results = inter_seg_definitions.loc[:, ('INTERCONNECTORID', 'LOSSSEGMENT', 'MEANVALUE', 'UPPERBOUND')]
     inter_variable_indexes = pd.merge(inter_variable_indexes, seg_results, 'inner', ['INTERCONNECTORID', 'LOSSSEGMENT'])
 
     return inter_variable_indexes
@@ -116,45 +110,46 @@ def calc_bound_for_segment(actual_break_point, higher_break_point, lower_break_p
 
     return limit, mean_value
 
-def create_req_row_indexes_for_inter(inter_variable_indexes, req_row_indexes, ns):
+
+def create_req_row_indexes_for_inter(inter_variable_indexes, req_row_indexes):
     # Give each interconnector variable the correct requirement row indexes so it contributes to the correct regional
     # constraints.
 
     # Redefine directions such that each interconnector is defined as coming from a particular region.
-    inter_variable_indexes[ns.col_direction] = np.where(
-        inter_variable_indexes[ns.col_direction] == ns.col_region_to,
-        ns.col_region_from, inter_variable_indexes[ns.col_direction])
+    inter_variable_indexes['DIRECTION'] = np.where(
+        inter_variable_indexes['DIRECTION'] == 'REGIONTO',
+        'REGIONFROM', inter_variable_indexes['DIRECTION'])
 
     # Split up interconnectors depending on whether or not they represent negative or postive flow as each type needs
     # to be processed differently.
     first_of_pairs = inter_variable_indexes[inter_variable_indexes['MWBREAKPOINT'] >= 0]
-    first_of_pairs = first_of_pairs.drop([ns.col_region_id, ns.col_direction], 1)
+    first_of_pairs = first_of_pairs.drop(['REGIONID', 'DIRECTION'], 1)
     second_of_pairs = inter_variable_indexes[inter_variable_indexes['MWBREAKPOINT'] < 0]
-    second_of_pairs = second_of_pairs.drop([ns.col_region_id, ns.col_direction], 1)
+    second_of_pairs = second_of_pairs.drop(['REGIONID', 'DIRECTION'], 1)
 
     # Create copies of the interconnectors that have the direction name reversed. The copy is need as each
     # interconnector must make a contribution both to the region it flows out of and the region it flows into.
     opposite_directions = inter_variable_indexes.copy()
-    opposite_directions[ns.col_direction] = np.where(opposite_directions[ns.col_direction] == ns.col_region_from,
-                                                     ns.col_region_to, ns.col_region_from)
+    opposite_directions['DIRECTION'] = np.where(opposite_directions['DIRECTION'] == 'REGIONFROM',
+                                                     'REGIONTO', 'REGIONFROM')
 
     # Break into negative and positive flow types so each can be processed separately. Also we only need to take one
     # unique set of inter id, direction, region id and bid type as the original direction data contains the segment
     # info.
     first_of_opposite_pairs = opposite_directions[opposite_directions['MWBREAKPOINT'] >= 0]. \
-        groupby([ns.col_inter_id, ns.col_bid_type], as_index=False).first()
-    first_of_opposite_pairs = first_of_opposite_pairs.loc[:, (ns.col_inter_id, ns.col_direction, ns.col_region_id,
-                                                              ns.col_bid_type)]
+        groupby(['INTERCONNECTORID', 'BIDTYPE'], as_index=False).first()
+    first_of_opposite_pairs = first_of_opposite_pairs.loc[:, ('INTERCONNECTORID', 'DIRECTION', 'REGIONID',
+                                                              'BIDTYPE')]
     second_of_opposite_pairs = opposite_directions[opposite_directions['MWBREAKPOINT'] < 0]. \
-        groupby([ns.col_inter_id, ns.col_bid_type], as_index=False).first()
-    second_of_opposite_pairs = second_of_opposite_pairs.loc[:, (ns.col_inter_id, ns.col_direction, ns.col_region_id,
-                                                                ns.col_bid_type)]
+        groupby(['INTERCONNECTORID', 'BIDTYPE'], as_index=False).first()
+    second_of_opposite_pairs = second_of_opposite_pairs.loc[:, ('INTERCONNECTORID', 'DIRECTION', 'REGIONID',
+                                                                'BIDTYPE')]
 
     # Merge opposite pairs with orginal paris to complete segment info.
     first_of_opposite_pairs = pd.merge(first_of_opposite_pairs, second_of_pairs, 'inner',
-                                       [ns.col_inter_id, ns.col_bid_type])
+                                       ['INTERCONNECTORID', 'BIDTYPE'])
     second_of_opposite_pairs = pd.merge(second_of_opposite_pairs, first_of_pairs, 'inner',
-                                        [ns.col_inter_id, ns.col_bid_type])
+                                        ['INTERCONNECTORID', 'BIDTYPE'])
 
     # Combine positive and negative flow segments back together.
     opposite_directions = pd.concat([first_of_opposite_pairs, second_of_opposite_pairs])
@@ -164,13 +159,13 @@ def create_req_row_indexes_for_inter(inter_variable_indexes, req_row_indexes, ns
 
     # Merge in requirement row info.
     inter_col_index_row_index = pd.merge(both_directions, req_row_indexes, 'left',
-                                         [ns.col_bid_type, ns.col_region_id])
+                                         ['BIDTYPE', 'REGIONID'])
 
     return inter_col_index_row_index
 
 
 def calculate_loss_factors_for_inter_segments(req_row_indexes, demand_by_region, inter_demand_coefficients,
-                                              inter_constants, ns):
+                                              inter_constants):
     # Calculate the average loss factor for each interconnector segment. This is based on the aemo dynamic loss
     # factor equations that take into account regional demand and determine different loss factors for discrete
     # interconnector segments.
@@ -191,19 +186,19 @@ def calculate_loss_factors_for_inter_segments(req_row_indexes, demand_by_region,
     idc = inter_demand_coefficients
     inter_demand_coefficients = {level: idc.xs(level).to_dict('index') for level in idc.index.levels[0]}
     # Calculate the average loss factor for each interconnector segment.
-    req_row_indexes[ns.col_lhs_coefficients] = \
+    req_row_indexes['LHSCOEFFICIENTS'] = \
         np.vectorize(calc_req_row_coefficients_for_inter,
                      excluded=['demand_by_region', 'ns', 'inter_demand_coefficients', 'loss_constants',
                                'flow_coefficient'])(
-            req_row_indexes['MEANVALUE'], req_row_indexes[ns.col_inter_id], req_row_indexes[ns.col_direction],
-            req_row_indexes[ns.col_bid_type], demand_by_region=demand_by_region, ns=ns,
+            req_row_indexes['MEANVALUE'], req_row_indexes['INTERCONNECTORID'], req_row_indexes['DIRECTION'],
+            req_row_indexes['BIDTYPE'], demand_by_region=demand_by_region,
             inter_demand_coefficients=inter_demand_coefficients, loss_constants=loss_constants, flow_coefficient=
             flow_coefficient)
 
     return req_row_indexes
 
 
-def calc_req_row_coefficients_for_inter(flow, inter_id, direction, bid_type, demand_by_region, ns,
+def calc_req_row_coefficients_for_inter(flow, inter_id, direction, bid_type, demand_by_region,
                                         inter_demand_coefficients, loss_constants, flow_coefficient):
     # This function implements the dynamic loss factor calculation.
     # Add the constant and the flow components to the loss factor.
@@ -217,32 +212,32 @@ def calc_req_row_coefficients_for_inter(flow, inter_id, direction, bid_type, dem
 
     # Translate the average loss factors to loss percentages.
     # TODO: Check this method.
-    if direction == ns.col_region_from:
+    if direction == 'REGIONFROM':
         average_loss_percent = average_loss_factor - 1
-    if direction == ns.col_region_to:
+    if direction == 'REGIONTO':
         average_loss_percent = 1 - average_loss_factor
 
     return average_loss_percent
 
 
-def convert_contribution_coefficients(req_row_indexes: pd, loss_proportions, ns) -> pd:
+def convert_contribution_coefficients(req_row_indexes, loss_proportions):
     # The loss from an interconnector are attributed to the two interconnected regions based on the input loss
     # proportions.
     # Select just the data needed.
     loss_proportions = loss_proportions.loc[:, ('INTERCONNECTORID', 'FROMREGIONLOSSSHARE')]
     # Map the loss proportions to the the loss percentages based on the interconnector.
-    req_row_indexes = pd.merge(req_row_indexes, loss_proportions, 'inner', [ns.col_inter_id])
+    req_row_indexes = pd.merge(req_row_indexes, loss_proportions, 'inner', ['INTERCONNECTORID'])
     # Modify the the loss percentages depending on whether it is a to or from loss percentage.
-    req_row_indexes[ns.col_lhs_coefficients] = np.where(
-        req_row_indexes[ns.col_direction] == ns.col_region_from,
-        req_row_indexes[ns.col_lhs_coefficients] * req_row_indexes['FROMREGIONLOSSSHARE'],
-        req_row_indexes[ns.col_lhs_coefficients] * (1 - req_row_indexes['FROMREGIONLOSSSHARE']))
+    req_row_indexes['LHSCOEFFICIENTS'] = np.where(
+        req_row_indexes['DIRECTION'] == 'REGIONFROM',
+        req_row_indexes['LHSCOEFFICIENTS'] * req_row_indexes['FROMREGIONLOSSSHARE'],
+        req_row_indexes['LHSCOEFFICIENTS'] * (1 - req_row_indexes['FROMREGIONLOSSSHARE']))
 
     # Change the loss percentages to contribution coefficients i.e how the interconnectors contribute to meeting
     # regional demand requiremnets after accounting for loss and loss proportions.
-    req_row_indexes[ns.col_lhs_coefficients] = np.where(req_row_indexes[ns.col_direction] == ns.col_region_from,
-                                                        -1 * (req_row_indexes[ns.col_lhs_coefficients] + 1),
-                                                        1 - (req_row_indexes[ns.col_lhs_coefficients]))
+    req_row_indexes['LHSCOEFFICIENTS'] = np.where(req_row_indexes['DIRECTION'] == 'REGIONFROM',
+                                                        -1 * (req_row_indexes['LHSCOEFFICIENTS'] + 1),
+                                                        1 - (req_row_indexes['LHSCOEFFICIENTS']))
     return req_row_indexes
 
 

@@ -88,32 +88,32 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
         bid_variable_data, capacity_bids_scaled, unit_solution_raw, max_con_index)
 
     # Create inter variables with indexes
-    inter_variable_indexes = interconnectors.index_inter(inter_direct_raw, inter_seg_definitions, max_var_index, ns)
+    inter_variable_indexes = interconnectors.index_inter(inter_direct_raw, inter_seg_definitions, max_var_index)
 
     # Create an upper bound for each inter variable
-    inter_bounds = interconnectors.add_inter_bounds(inter_variable_indexes, inter_seg_definitions, ns)
+    inter_bounds = interconnectors.add_inter_bounds(inter_variable_indexes, inter_seg_definitions)
 
     # Find the current maximum index of the system variable, so new variable can be assigned correct unique indexes.
     max_var_index = hf.max_variable_index(inter_variable_indexes)
 
     # Create the RHS sides of the constraints that force regional demand and FCAS requirements to be met.
     max_con_index = hf.max_constraint_index(joint_capacity_constraints)
-    region_req_by_row = create_region_req_contribution_to_constraint_matrix(region_req_raw, max_con_index, ns)
+    region_req_by_row = create_region_req_contribution_to_constraint_matrix(region_req_raw, max_con_index)
 
     # Create the coefficients that determine how much a generator contributes to meeting a regions requirements.
     req_row_coefficients = create_region_req_coefficients(duid_info, region_req_by_row, bid_variable_data, ns)
 
     # Create the coefficients that determine how much an interconnector contributes to meeting a regions requirements.
     # For each segment of an interconnector calculate its loss percentage.
-    inter_segments_loss_factors = interconnectors.incalculate_loss_factors_for_inter_segments(
-        inter_bounds.copy(), region_req_raw, inter_demand_coefficients, inter_direct_raw, ns)
+    inter_segments_loss_factors = interconnectors.calculate_loss_factors_for_inter_segments(
+        inter_bounds.copy(), region_req_raw, inter_demand_coefficients, inter_direct_raw)
 
     # For each segment of an interconnector assign it indexes such that its flows are attributed to the correct regions.
     req_row_indexes_for_inter = interconnectors.create_req_row_indexes_for_inter(inter_segments_loss_factors,
-                                                                                 region_req_by_row, ns)
+                                                                                 region_req_by_row)
     # Convert the loss percentages of interconnectors into contribution coefficients.
     req_row_indexes_coefficients_for_inter = interconnectors.convert_contribution_coefficients(
-        req_row_indexes_for_inter, inter_direct_raw, ns)
+        req_row_indexes_for_inter, inter_direct_raw)
 
     # Filter out mnsp interconnectors that are not specified as type 'MNSP' in the general interconnector data.
     mnsp_inter = interconnectors.match_against_inter_data(mnsp_inter, inter_direct_raw)
@@ -277,12 +277,12 @@ def create_generic_constraints(connection_point_constraints, inter_constraints, 
     return combined_constraints, type_and_rhs
 
 
-def create_region_req_contribution_to_constraint_matrix(latest_region_req, start_index, ns):
+def create_region_req_contribution_to_constraint_matrix(latest_region_req, start_index,):
     # Create a set of row indexes for each regions requirement constraints.
-    region_req_by_row = index_region_constraints(latest_region_req, start_index, ns)
+    region_req_by_row = index_region_constraints(latest_region_req, start_index)
     # Change the naming of columns to match those use for generator bidding constraints. Allows the constraints to
     # be processed together later on.
-    region_req_by_row = change_req_naming_to_bid_naming(region_req_by_row, ns)
+    region_req_by_row = change_req_naming_to_bid_naming(region_req_by_row)
     region_req_by_row['CONSTRAINTTYPE'] = '='
     return region_req_by_row
 
@@ -384,32 +384,32 @@ def insert_col_fcas_integer_variable(gen_variables_in_cols, new_col_name):
     return gen_variables_in_cols
 
 
-def index_region_constraints(raw_constraints, max_constraint_row_index, ns):
+def index_region_constraints(raw_constraints, max_constraint_row_index):
     # Create constraint rows for regional based constraints.
-    row_for_each_constraint = hf.stack_columns(raw_constraints, [ns.col_region_id], ['TOTALDEMAND'],
-                                            ns.col_region_constraint_type, ns.col_region_constraint_value)
-    row_for_each_constraint_indexed = hf.save_index(row_for_each_constraint, ns.col_constraint_row_index,
+    row_for_each_constraint = hf.stack_columns(raw_constraints, ['REGIONID'], ['TOTALDEMAND'],
+                                            'CONSTRAINTTYPE', 'RHSCONSTANT')
+    row_for_each_constraint_indexed = hf.save_index(row_for_each_constraint, 'ROWINDEX',
                                                  max_constraint_row_index + 1)
     return row_for_each_constraint_indexed
 
 
-def change_req_naming_to_bid_naming(df_with_req_naming, ns):
+def change_req_naming_to_bid_naming(df_with_req_naming):
     # Change the naming conventions of regional requirements to match the naming conventions of bidding, this allows
     # bidding variables to contribute to the correct regional requirements.
     df_with_bid_naming = df_with_req_naming.copy()
     # Apply the mapping of naming defined in the given function.
-    df_with_bid_naming[ns.col_bid_type] = \
-        df_with_bid_naming[ns.col_region_constraint_type].apply(map_req_naming_to_bid_naming, args=(ns,))
-    df_with_bid_naming = df_with_bid_naming.drop(ns.col_region_constraint_type, axis=1)
+    df_with_bid_naming['BIDTYPE'] = \
+        df_with_bid_naming['CONSTRAINTTYPE'].apply(map_req_naming_to_bid_naming)
+    df_with_bid_naming = df_with_bid_naming.drop('CONSTRAINTTYPE', axis=1)
     return df_with_bid_naming
 
 
-def map_req_naming_to_bid_naming(req_name, ns):
+def map_req_naming_to_bid_naming(req_name):
     # Define the mapping of requirement naming to bidding naming.
-    if req_name == ns.col_gen_req:
-        bid_name = ns.type_energy
+    if req_name == 'TOTALDEMAND':
+        bid_name = 'ENERGY'
     else:
-        characters_to_remove = len(ns.req_suffix)
+        characters_to_remove = len('LOCALDISPATCH')
         bid_name = req_name[:-characters_to_remove]
     return bid_name
 
