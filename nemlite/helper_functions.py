@@ -1,5 +1,5 @@
 import numpy as np
-import  pandas as pd
+import pandas as pd
 
 
 def save_index(dataframe, new_col_name, offset=0):
@@ -23,3 +23,18 @@ def stack_columns(data_in, cols_to_keep, cols_to_stack, type_name, value_name):
     stacked_data = pd.melt(data_in, id_vars=cols_to_keep, value_vars=cols_to_stack,
                            var_name=type_name, value_name=value_name)
     return stacked_data
+
+
+def add_capacity_band_type(df_with_price_bands, ns):
+    # Map the names of the capacity bands to a dataframe that already has the names of the price bands.
+    band_map = pd.DataFrame()
+    band_map[ns.col_price_band_number] = ns.cols_bid_price_name_list
+    band_map[ns.col_capacity_band_number] = ns.cols_bid_cap_name_list
+    df_with_capacity_and_price_bands = pd.merge(df_with_price_bands, band_map, 'left', [ns.col_price_band_number])
+    return df_with_capacity_and_price_bands
+
+
+def max_variable_index(newest_variable_data):
+    # Find the maximum variable index already in use in the constraint matrix.
+    max_index = newest_variable_data['INDEX'].max()
+    return max_index
