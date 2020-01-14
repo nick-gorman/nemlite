@@ -88,7 +88,7 @@ def calc_bound_for_segment(actual_break_point, higher_break_point, lower_break_p
     # between its break point and 0 MW.
     elif actual_break_point > 0.1 and lower_break_point <= 0.1:
         limit = actual_break_point
-        mean_value = actual_break_point / 2
+        mean_value = (actual_break_point + lower_break_point) / 2
     # If the segment is the zero segment (may not exist) then it does not apply to any flow.
     elif 0.1 > actual_break_point > -0.1:
         limit = 0
@@ -97,7 +97,7 @@ def calc_bound_for_segment(actual_break_point, higher_break_point, lower_break_p
     # between its break point and 0 MW.
     elif actual_break_point < - 0.1 and higher_break_point >= - 0.1:
         limit = abs(actual_break_point)
-        mean_value = actual_break_point / 2
+        mean_value = (actual_break_point + higher_break_point) / 2
     # If the segment is negative and not adjacent to positive segments it applies to the flow between its break point
     # and the break point of the adjacent higher segment.
     elif actual_break_point < 0.1 and higher_break_point < 0.1:
@@ -170,9 +170,10 @@ def calculate_loss_factors_for_inter_segments(req_row_indexes, demand_by_region,
     # factor equations that take into account regional demand and determine different loss factors for discrete
     # interconnector segments.
     # Convert demand data into a dictionary to speed up value selection in the vectorized loss factor calculations.
-    demand_by_region = demand_by_region.loc[:, ('REGIONID', 'TOTALDEMAND')]
+    demand_by_region['LOSSDEMAND'] = demand_by_region['INITIALSUPPLY'] + demand_by_region['DEMANDFORECAST']
+    demand_by_region = demand_by_region.loc[:, ('REGIONID', 'LOSSDEMAND')]
     demand_by_region = demand_by_region.set_index('REGIONID')
-    demand_by_region = demand_by_region['TOTALDEMAND'].to_dict()
+    demand_by_region = demand_by_region['LOSSDEMAND'].to_dict()
     # Convert interconnector loss constant and loss coefficient data into a dictionary to speed up value selection in
     # the vectorized loss factor calculations.
     inter_constants = inter_constants.loc[:, ('INTERCONNECTORID', 'LOSSCONSTANT', 'LOSSFLOWCOEFFICIENT')]
