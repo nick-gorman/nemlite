@@ -111,7 +111,7 @@ def calc_bound_for_segment(actual_break_point, higher_break_point, lower_break_p
     return limit, mean_value
 
 
-def create_req_row_indexes_for_inter(inter_variable_indexes, req_row_indexes):
+def create_req_row_indexes_for_inter(inter_variable_indexes, req_row_indexes, inter_types):
     # Give each interconnector variable the correct requirement row indexes so it contributes to the correct regional
     # constraints.
 
@@ -120,7 +120,7 @@ def create_req_row_indexes_for_inter(inter_variable_indexes, req_row_indexes):
         inter_variable_indexes['DIRECTION'] == 'REGIONTO',
         'REGIONFROM', inter_variable_indexes['DIRECTION'])
 
-    # Split up interconnectors depending on whether or not they represent negative or postive flow as each type needs
+    # Split up interconnectors depending on whether or not they represent negative or positive flow as each type needs
     # to be processed differently.
     first_of_pairs = inter_variable_indexes[inter_variable_indexes['MWBREAKPOINT'] >= 0]
     first_of_pairs = first_of_pairs.drop(['REGIONID', 'DIRECTION'], 1)
@@ -154,12 +154,16 @@ def create_req_row_indexes_for_inter(inter_variable_indexes, req_row_indexes):
     # Combine positive and negative flow segments back together.
     opposite_directions = pd.concat([first_of_opposite_pairs, second_of_opposite_pairs])
 
+    # Remove REGIONTO for market interconnectors as these connect to their regions through links.
+    opposite_directions = \
+        opposite_directions[~opposite_directions['INTERCONNECTORID']
+            .isin(inter_types[inter_types['ICTYPE'] == 'MNSP']['INTERCONNECTORID'])]
+
     # Combine opposite flow variables with normal variables.
     both_directions = pd.concat([inter_variable_indexes, opposite_directions])
 
     # Merge in requirement row info.
-    inter_col_index_row_index = pd.merge(both_directions, req_row_indexes, 'left',
-                                         ['BIDTYPE', 'REGIONID'])
+    inter_col_index_row_index = pd.merge(both_directions, req_row_indexes, 'left', ['BIDTYPE', 'REGIONID'])
 
     return inter_col_index_row_index
 
@@ -242,11 +246,12 @@ def convert_contribution_coefficients(req_row_indexes, loss_proportions):
     return req_row_indexes
 
 
-def match_against_inter_data(mnsp_data, all_inter_data):
+def match_against_inter_data(all_inters, all_inter_data):
     # Select mnsp data only where they are also listed as an mnsp interconnector in the combined interconnector data.
     just_mnsp = all_inter_data[all_inter_data['ICTYPE'] == 'MNSP']['INTERCONNECTORID']
-    mnsp_data = mnsp_data[mnsp_data['INTERCONNECTORID'].isin(just_mnsp)]
-    return mnsp_data
+    mnsp_data = all_inters[all_inters['INTERCONNECTORID'].isin(just_mnsp)]
+    regulated_data = all_inters[~all_inters['INTERCONNECTORID'].isin(just_mnsp)]
+    return mnsp_data, regulated_data
 
 
 def create_mnsp_link_indexes(mnsp_capacity_bids, max_var_index):
@@ -283,24 +288,44 @@ def create_mnsp_region_requirement_coefficients(var_indexes, inter_data, region_
     # Map links to interconnectors.
     link_and_inter_data = pd.merge(inter_data, var_indexes, 'inner', 'LINKID')
     # Refine data to only columns needed for from region calculations.
-    from_region_data = link_and_inter_data.loc[:, ('LINKID', 'FROMREGION', 'FROM_REGION_TLF', 'INDEX')]
+    #from_region_data = link_and_inter_data.loc[:, ('LINKID', 'FROMREGION', 'FROM_REGION_TLF', 'INDEX')]
     # From region flows are attributed to regions as the negative invereses of their loss factors, this represents the
     # fact that link losses cause more power to be draw from a region than actually flow down the line.
-    from_region_data['FROM_REGION_TLF'] = -1 / from_region_data['FROM_REGION_TLF']
-    from_region_data.columns = ['LINKID', 'REGIONID', 'LHSCOEFFICIENTS', 'INDEX']
+    #from_region_data['FROM_REGION_TLF'] = -1 / from_region_data['FROM_REGION_TLF']
+    #from_region_data.columns = ['LINKID', 'REGIONID', 'LHSCOEFFICIENTS', 'INDEX']
     # Refine data to only columns needed for from region calculations
-    to_region_data = link_and_inter_data.loc[:, ('LINKID', 'TOREGION', 'TO_REGION_TLF', 'INDEX')]
+    to_region_data = link_and_inter_data.loc[:, ('LINKID', 'TOREGION', 'INDEX')]
     # To region flows are attributed to regions as their loss factors, this represents the fact that link losses cause
     # less power to be delivered to a region than actually flow down the line.
-    to_region_data.columns = ['LINKID', 'REGIONID', 'LHSCOEFFICIENTS', 'INDEX']
+    to_region_data.columns = ['LINKID', 'REGIONID', 'INDEX']
+    to_region_data['LHSCOEFFICIENTS'] = 1
     # Combine to from region coefficients.
-    lhs_coefficients = pd.concat([from_region_data, to_region_data])
+    #lhs_coefficients = pd.concat([from_region_data, to_region_data])
     # Select just the region requirements for energy.
     region_requirements_just_energy = region_requirements[region_requirements['BIDTYPE'] == 'ENERGY']
     # Map the requirement constraint rows to the link coefficients based on their region.
-    lhs_coefficients_and_row_index = pd.merge(lhs_coefficients, region_requirements_just_energy, 'inner', 'REGIONID')
+    lhs_coefficients_and_row_index = pd.merge(region_requirements_just_energy, to_region_data, 'inner', 'REGIONID')
     lhs_coefficients_and_row_index = lhs_coefficients_and_row_index.loc[:, ('INDEX', 'ROWINDEX', 'LHSCOEFFICIENTS')]
     return lhs_coefficients_and_row_index
+
+
+def create_from_region_mnsp_region_requirement_constraints(mnsp_link_indexes, mnsp_inter, mnsp_segments, max_con_index):
+    mnsp_inter = hf.save_index(mnsp_inter.reset_index(drop=True), 'ROWINDEX', max_con_index + 1)
+    link_and_inter_data = pd.merge(mnsp_inter, mnsp_link_indexes, 'inner', 'LINKID')
+    mnsp_segments['DIRECTION'] = np.where(mnsp_segments['DIRECTION'] == 'REGIONTO',
+                                          'REGIONFROM', mnsp_segments['DIRECTION'])
+    mnsp_segments = pd.merge(mnsp_segments, mnsp_inter, 'inner', left_on=['INTERCONNECTORID', 'REGIONID'],
+                             right_on=['INTERCONNECTORID', 'FROMREGION'])
+    mnsp_segments = mnsp_segments.loc[:, ['INDEX', 'ROWINDEX']]
+    mnsp_segments['LHSCOEFFICIENTS'] = -1
+    mnsp_segments['CONSTRAINTTYPE'] = '='
+    mnsp_segments['RHSCONSTANT'] = 0
+    link_and_inter_data = link_and_inter_data.loc[:, ['INDEX', 'ROWINDEX']]
+    link_and_inter_data['LHSCOEFFICIENTS'] = -1
+    link_and_inter_data['CONSTRAINTTYPE'] = '='
+    link_and_inter_data['RHSCONSTANT'] = 0
+    constraints = pd.concat([mnsp_segments, link_and_inter_data])
+    return constraints
 
 
 def create_inter_seg_dispatch_order_constraints(inter_var_indexes, row_offset, var_offset):

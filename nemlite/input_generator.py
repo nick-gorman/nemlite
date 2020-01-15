@@ -66,9 +66,9 @@ def load_and_merge(date_time_name, filtered_data):
         else:
             print('Parent table left unmerged')
 
-    child_tables['interconnector_segments'] = \
-        child_tables['interconnector_segments'][~child_tables['interconnector_segments']['INTERCONNECTORID']
-        .isin(child_tables['interconnectors'][child_tables['interconnectors']['ICTYPE'] == 'MNSP']['INTERCONNECTORID'])]
+    #child_tables['interconnector_segments'] = \
+    #    child_tables['interconnector_segments'][~child_tables['interconnector_segments']['INTERCONNECTORID']
+    #    .isin(child_tables['interconnectors'][child_tables['interconnectors']['ICTYPE'] == 'MNSP']['INTERCONNECTORID'])]
 
     return child_tables
 
