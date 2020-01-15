@@ -117,6 +117,11 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
     req_row_indexes_coefficients_for_inter = interconnectors.convert_contribution_coefficients(
         req_row_indexes_for_inter, inter_direct_raw)
 
+    # Split out mnsp region segments
+    mnsp_to_region_segments, req_row_indexes_coefficients_for_inter = interconnectors.split_out_mnsp_to_region(
+        req_row_indexes_coefficients_for_inter, inter_direct_raw
+    )
+
     # Filter out mnsp interconnectors that are not specified as type 'MNSP' in the general interconnector data.
     mnsp_inter, _ = interconnectors.match_against_inter_data(mnsp_inter, inter_direct_raw)
 
@@ -132,7 +137,7 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
     max_con_index = hf.max_constraint_index(region_req_by_row)
     constraints_coupling_links_to_interconnector = \
         interconnectors.create_from_region_mnsp_region_requirement_constraints(
-        mnsp_link_indexes, mnsp_inter, region_req_by_row, mnsp_segments, max_con_index)
+        mnsp_link_indexes, mnsp_inter, mnsp_to_region_segments, max_con_index)
 
     # Create mnsp objective coefficients
     mnsp_objective_coefficients = interconnectors.create_mnsp_objective_coefficients(

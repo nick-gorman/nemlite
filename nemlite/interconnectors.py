@@ -154,11 +154,6 @@ def create_req_row_indexes_for_inter(inter_variable_indexes, req_row_indexes, in
     # Combine positive and negative flow segments back together.
     opposite_directions = pd.concat([first_of_opposite_pairs, second_of_opposite_pairs])
 
-    # Remove REGIONTO for market interconnectors as these connect to their regions through links.
-    opposite_directions = \
-        opposite_directions[~opposite_directions['INTERCONNECTORID']
-            .isin(inter_types[inter_types['ICTYPE'] == 'MNSP']['INTERCONNECTORID'])]
-
     # Combine opposite flow variables with normal variables.
     both_directions = pd.concat([inter_variable_indexes, opposite_directions])
 
@@ -229,15 +224,19 @@ def convert_contribution_coefficients(req_row_indexes, loss_proportions):
     # The loss from an interconnector are attributed to the two interconnected regions based on the input loss
     # proportions.
     # Select just the data needed.
-    loss_proportions = loss_proportions.loc[:, ('INTERCONNECTORID', 'FROMREGIONLOSSSHARE')]
+    loss_proportions = loss_proportions.loc[:, ('INTERCONNECTORID', 'FROMREGIONLOSSSHARE', 'REGIONTO', 'REGIONFROM')]
     # Map the loss proportions to the the loss percentages based on the interconnector.
     req_row_indexes = pd.merge(req_row_indexes, loss_proportions, 'inner', ['INTERCONNECTORID'])
+    # Change the loss share to correct for the reverse interconnector segments
+    req_row_indexes['LOSSSHARE'] = np.where(req_row_indexes['REGIONFROM'] == req_row_indexes['REGIONID'],
+                                                      req_row_indexes['FROMREGIONLOSSSHARE'],
+                                                      1 - req_row_indexes['FROMREGIONLOSSSHARE'])
     # Modify the the loss percentages depending on whether it is a to or from loss percentage.
-    req_row_indexes['LHSCOEFFICIENTS'] = np.where(
-        req_row_indexes['DIRECTION'] == 'REGIONFROM',
-        req_row_indexes['LHSCOEFFICIENTS'] * req_row_indexes['FROMREGIONLOSSSHARE'],
-        req_row_indexes['LHSCOEFFICIENTS'] * (1 - req_row_indexes['FROMREGIONLOSSSHARE']))
-
+    #req_row_indexes['LHSCOEFFICIENTS'] = np.where(
+    #    req_row_indexes['DIRECTION'] == 'REGIONFROM',
+    #    req_row_indexes['LHSCOEFFICIENTS'] * req_row_indexes['FROMREGIONLOSSSHARE'],
+    #    req_row_indexes['LHSCOEFFICIENTS'] * (1 - req_row_indexes['FROMREGIONLOSSSHARE']))
+    req_row_indexes['LHSCOEFFICIENTS'] = req_row_indexes['LHSCOEFFICIENTS'] * req_row_indexes['LOSSSHARE']
     # Change the loss percentages to contribution coefficients i.e how the interconnectors contribute to meeting
     # regional demand requiremnets after accounting for loss and loss proportions.
     req_row_indexes['LHSCOEFFICIENTS'] = np.where(req_row_indexes['DIRECTION'] == 'REGIONFROM',
@@ -254,6 +253,16 @@ def match_against_inter_data(all_inters, all_inter_data):
     return mnsp_data, regulated_data
 
 
+def split_out_mnsp_to_region(all_inters, all_inter_data):
+    # Select mnsp data only where they are also listed as an mnsp interconnector in the combined interconnector data.
+    just_mnsp = all_inter_data[all_inter_data['ICTYPE'] == 'MNSP']['INTERCONNECTORID']
+    mnsp_data_to = all_inters[(all_inters['INTERCONNECTORID'].isin(just_mnsp)
+                               & (all_inters['DIRECTION'] == 'REGIONTO'))]
+    other = all_inters[~((all_inters['INTERCONNECTORID'].isin(just_mnsp)
+                               & (all_inters['DIRECTION'] == 'REGIONTO')))]
+    return mnsp_data_to, other
+
+
 def create_mnsp_link_indexes(mnsp_capacity_bids, max_var_index):
     # Create variable indexes for each link bid into the energy market. This is done by stacking, reindexing and saving
     # the off set index values as the row index colum.
@@ -263,6 +272,7 @@ def create_mnsp_link_indexes(mnsp_capacity_bids, max_var_index):
     type_name = 'CAPACITYBAND'
     value_name = 'BIDVALUE'
     stacked_bids = hf.stack_columns(mnsp_capacity_bids, cols_to_keep, cols_to_stack, type_name, value_name)
+    stacked_bids = stacked_bids[stacked_bids['BIDVALUE'] > 0]
     stacked_bids = hf.save_index(stacked_bids, 'INDEX', max_var_index + 1)
     return stacked_bids
 
@@ -312,16 +322,15 @@ def create_mnsp_region_requirement_coefficients(var_indexes, inter_data, region_
 def create_from_region_mnsp_region_requirement_constraints(mnsp_link_indexes, mnsp_inter, mnsp_segments, max_con_index):
     mnsp_inter = hf.save_index(mnsp_inter.reset_index(drop=True), 'ROWINDEX', max_con_index + 1)
     link_and_inter_data = pd.merge(mnsp_inter, mnsp_link_indexes, 'inner', 'LINKID')
-    mnsp_segments['DIRECTION'] = np.where(mnsp_segments['DIRECTION'] == 'REGIONTO',
-                                          'REGIONFROM', mnsp_segments['DIRECTION'])
+    mnsp_segments = mnsp_segments.copy()
+    mnsp_segments = mnsp_segments.drop('ROWINDEX', axis=1)
     mnsp_segments = pd.merge(mnsp_segments, mnsp_inter, 'inner', left_on=['INTERCONNECTORID', 'REGIONID'],
-                             right_on=['INTERCONNECTORID', 'FROMREGION'])
-    mnsp_segments = mnsp_segments.loc[:, ['INDEX', 'ROWINDEX']]
-    mnsp_segments['LHSCOEFFICIENTS'] = -1
+                             right_on=['INTERCONNECTORID', 'TOREGION'])
+    mnsp_segments = mnsp_segments.loc[:, ['INDEX', 'ROWINDEX', 'LHSCOEFFICIENTS']]
     mnsp_segments['CONSTRAINTTYPE'] = '='
     mnsp_segments['RHSCONSTANT'] = 0
     link_and_inter_data = link_and_inter_data.loc[:, ['INDEX', 'ROWINDEX']]
-    link_and_inter_data['LHSCOEFFICIENTS'] = -1
+    link_and_inter_data['LHSCOEFFICIENTS'] = - 1
     link_and_inter_data['CONSTRAINTTYPE'] = '='
     link_and_inter_data['RHSCONSTANT'] = 0
     constraints = pd.concat([mnsp_segments, link_and_inter_data])
