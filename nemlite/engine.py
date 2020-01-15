@@ -118,7 +118,7 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
         req_row_indexes_for_inter, inter_direct_raw)
 
     # Split out mnsp region segments
-    mnsp_to_region_segments, req_row_indexes_coefficients_for_inter = interconnectors.split_out_mnsp_to_region(
+    mnsp_to_region_segments, _ = interconnectors.split_out_mnsp_to_region(
         req_row_indexes_coefficients_for_inter, inter_direct_raw
     )
 
@@ -159,9 +159,6 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
                              req_row_coefficients,
                              req_row_indexes_coefficients_for_inter,
                              generic_constraints,
-                             #     inter_seg_dispatch_order_constraints,
-                             mnsp_link_region_requirement_coefficients,
-                             constraints_coupling_links_to_interconnector,
                              joint_capacity_constraints]
 
     combined_constraints = combine_constraint_matrix_coefficients_data_frames(coefficient_data_list)
@@ -170,18 +167,17 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
     duid_objective_coefficients = create_objective_coefficients(price_bids_raw, bid_variable_data, duid_info, ns)
 
     # Add region to bid index data
-    objective_coefficients = pd.concat([duid_objective_coefficients, mnsp_objective_coefficients], sort=False)
+    objective_coefficients = pd.concat([duid_objective_coefficients], sort=False)
     prices_and_indexes = objective_coefficients.loc[:, (ns.col_variable_index, ns.col_bid_value)]
     prices_and_indexes.columns = [ns.col_variable_index, ns.col_price]
     link_data_as_bid_data = create_duid_version_of_link_data(mnsp_link_indexes.copy())
-    bid_variable_data = pd.concat([bid_variable_data, link_data_as_bid_data], sort=False)
+    bid_variable_data = pd.concat([bid_variable_data], sort=False)
     bid_variable_data = pd.merge(bid_variable_data, prices_and_indexes, 'inner', on=ns.col_variable_index)
 
 
     # List of inequality types.
     rhs_and_inequality_types = create_inequality_types([bidding_constraints, region_req_by_row, type_and_rhs,
-                                                        joint_capacity_constraints,
-                                                        constraints_coupling_links_to_interconnector], ns)
+                                                        joint_capacity_constraints], ns)
 
     return combined_constraints, rhs_and_inequality_types, objective_coefficients, bid_variable_data, \
            req_row_indexes_coefficients_for_inter, region_req_by_row,
@@ -264,8 +260,7 @@ def create_generic_constraints(connection_point_constraints, inter_constraints, 
     region_cons = active_region_cons.loc[:, cols_to_keep]
 
     # Combine connection point, interconnector and regional constraint information.
-    combined_constraints = pd.concat([duid_constraints, inter_constraints,
-                                      region_cons, inter_constraints_mnsp], sort=False)  # type: pd.DataFrame
+    combined_constraints = pd.concat([duid_constraints, inter_constraints, region_cons], sort=False)
 
     # Prepare a dataframe summarising key constrain information
     type_and_rhs = combined_constraints.loc[:, ('CONSTRAINTTYPE', 'RHS', 'GENCONID', 'GENERICCONSTRAINTWEIGHT')]
