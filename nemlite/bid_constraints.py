@@ -5,7 +5,7 @@ from nemlite import helper_functions as hf
 def create_bidding_contribution_to_constraint_matrix(capacity_bids):
     bids_and_indexes = create_bidding_index(capacity_bids.copy())
     unit_max_energy_constraints = create_constraints(bids_and_indexes.copy(), capacity_bids.copy(),
-                                                     bid_types=['ENERGY'], max_row_index=0, rhs_col='MAXENERGY',
+                                                     bid_types=['ENERGY'], max_row_index=-1, rhs_col='MAXENERGY',
                                                      direction='<=')
     max_con_index = hf.max_constraint_index(unit_max_energy_constraints)
     unit_min_energy_constraints = create_constraints(bids_and_indexes.copy(), capacity_bids.copy(),

@@ -11,9 +11,7 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
 
     # Create the set of variables that define generator energy and FCAS dispatch.
     variables = {}
-    bid_bounds = bid_bounds.sort_values('INDEX')
-    bid_bounds = bid_bounds.reset_index()
-    bid_bounds['MIPINDEX'] = bid_bounds.index
+
     for upper_bound, index, band_type in zip(list(bid_bounds['BID']), list(bid_bounds['INDEX']),
                                              list(bid_bounds['CAPACITYBAND'])):
         if (band_type == 'FCASINTEGER') | (band_type == 'INTERTRIGGERVAR'):
@@ -23,8 +21,6 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
 
     # Create set of variables that define interconnector flow.
     inter_bounds = inter_bounds.sort_values('INDEX')
-    inter_bounds = inter_bounds.reset_index()
-    inter_bounds['MIPINDEX'] = inter_bounds.index
     for index, upper_bound in zip(list(inter_bounds['INDEX']), list(inter_bounds['UPPERBOUND'])):
         if band_type == 'INTERTRIGGERVAR':
             variables[index] = prob.add_var(lb=0, ub=upper_bound, var_type=INTEGER, name=str(index))
@@ -43,7 +39,6 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
     constraint_matrix = combined_constraints.pivot('ROWINDEX', 'INDEX', 'LHSCOEFFICIENTS')
     constraint_matrix = constraint_matrix.sort_index(axis=1)
     row_indices = np.asarray(constraint_matrix.index)
-    var_indices = np.asarray(constraint_matrix.columns)
     constraint_matrix = np.asarray(constraint_matrix)
     # constraint_dict = {g: s.tolist() for g, s in combined_constraints['LHSCOEFFICIENTSVARS'].groupby('ROWINDEX')}
     rhs = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['RHSCONSTANT']))
@@ -61,9 +56,9 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
     dispatches = {}
     inter_flows = {}
 
-    bid_bounds['VARS'] = [variables[i] for i in bid_bounds['MIPINDEX']]
+    bid_bounds['VARS'] = [variables[i] for i in bid_bounds['INDEX']]
     bid_bounds['NAMECHECK'] = bid_bounds['VARS'].apply(lambda x: x.name)
-    inter_bounds['VARS'] = [variables[i] for i in inter_bounds['MIPINDEX']]
+    inter_bounds['VARS'] = [variables[i] for i in inter_bounds['INDEX']]
     inter_bounds['NAMECHECK'] = inter_bounds['VARS'].apply(lambda x: x.name)
 
     # Copy initial problem so subsequent runs can use it.
