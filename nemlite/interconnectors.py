@@ -273,7 +273,7 @@ def create_mnsp_link_indexes(mnsp_capacity_bids, max_var_index):
     value_name = 'BIDVALUE'
     stacked_bids = hf.stack_columns(mnsp_capacity_bids, cols_to_keep, cols_to_stack, type_name, value_name)
     stacked_bids = stacked_bids[stacked_bids['BIDVALUE'] > 0]
-    stacked_bids = hf.save_index(stacked_bids, 'INDEX', max_var_index + 1)
+    stacked_bids = hf.save_index(stacked_bids.reset_index(drop=True), 'INDEX', max_var_index + 1)
     return stacked_bids
 
 
@@ -323,14 +323,14 @@ def create_from_region_mnsp_region_requirement_constraints(mnsp_link_indexes, mn
     mnsp_inter = hf.save_index(mnsp_inter.reset_index(drop=True), 'ROWINDEX', max_con_index + 1)
     link_and_inter_data = pd.merge(mnsp_inter, mnsp_link_indexes, 'inner', 'LINKID')
     mnsp_segments = mnsp_segments.copy()
-    mnsp_segments = mnsp_segments.drop('ROWINDEX', axis=1)
     mnsp_segments = pd.merge(mnsp_segments, mnsp_inter, 'inner', left_on=['INTERCONNECTORID', 'REGIONID'],
-                             right_on=['INTERCONNECTORID', 'TOREGION'])
-    mnsp_segments = mnsp_segments.loc[:, ['INDEX', 'ROWINDEX', 'LHSCOEFFICIENTS']]
+                             right_on=['INTERCONNECTORID', 'FROMREGION'])
+    mnsp_segments = mnsp_segments.loc[:, ['INDEX', 'ROWINDEX']]
+    mnsp_segments['LHSCOEFFICIENTS'] = 0
     mnsp_segments['CONSTRAINTTYPE'] = '='
     mnsp_segments['RHSCONSTANT'] = 0
     link_and_inter_data = link_and_inter_data.loc[:, ['INDEX', 'ROWINDEX']]
-    link_and_inter_data['LHSCOEFFICIENTS'] = - 1
+    link_and_inter_data['LHSCOEFFICIENTS'] = 1
     link_and_inter_data['CONSTRAINTTYPE'] = '='
     link_and_inter_data['RHSCONSTANT'] = 0
     constraints = pd.concat([mnsp_segments, link_and_inter_data])
