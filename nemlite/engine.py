@@ -109,8 +109,8 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
         inter_bounds.copy(), region_req_raw, inter_demand_coefficients, inter_direct_raw)
 
     # For each segment of an interconnector assign it indexes such that its flows are attributed to the correct regions.
-    mnsp_segments, regulated_segments = interconnectors.match_against_inter_data(inter_segments_loss_factors,
-                                                                                 inter_direct_raw)
+    #mnsp_segments, regulated_segments = interconnectors.match_against_inter_data(inter_segments_loss_factors,
+    #                                                                             inter_direct_raw)
     req_row_indexes_for_inter = interconnectors.create_req_row_indexes_for_inter(inter_segments_loss_factors,
                                                                                  region_req_by_row, inter_direct_raw)
     # Convert the loss percentages of interconnectors into contribution coefficients.
@@ -118,26 +118,26 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
         req_row_indexes_for_inter, inter_direct_raw)
 
     # Split out mnsp region segments
-    mnsp_to_region_segments, _ = interconnectors.split_out_mnsp_to_region(
+    mnsp_to_region_segments, _ = interconnectors.match_against_inter_data(
         req_row_indexes_coefficients_for_inter, inter_direct_raw
     )
 
     # Filter out mnsp interconnectors that are not specified as type 'MNSP' in the general interconnector data.
-    mnsp_inter, _ = interconnectors.match_against_inter_data(mnsp_inter, inter_direct_raw)
+    #mnsp_inter, _ = interconnectors.match_against_inter_data(mnsp_inter, inter_direct_raw)
 
     # Create a set of indexes for the mnsp links.
     # max_var_index = max_variable_index(inter_seg_dispatch_order_constraints)
-    mnsp_link_indexes = interconnectors.create_mnsp_link_indexes(mnsp_capacity_bids, max_var_index)
+    #mnsp_link_indexes = interconnectors.create_mnsp_link_indexes(mnsp_capacity_bids, max_var_index)
 
     # Create contribution coefficients for mnsp link variables.
-    mnsp_link_region_requirement_coefficients = interconnectors.create_mnsp_region_requirement_coefficients(
-        mnsp_link_indexes, mnsp_inter, region_req_by_row)
+    #mnsp_link_region_requirement_coefficients = interconnectors.create_mnsp_region_requirement_coefficients(
+    #    mnsp_link_indexes, mnsp_inter, region_req_by_row)
 
     # For mnsp links to connect to the interconnector loss model
-    max_con_index = hf.max_constraint_index(region_req_by_row)
-    constraints_coupling_links_to_interconnector = \
-        interconnectors.create_from_region_mnsp_region_requirement_constraints(
-        mnsp_link_indexes, mnsp_inter, mnsp_to_region_segments, max_con_index)
+    #max_con_index = hf.max_constraint_index(region_req_by_row)
+    #constraints_coupling_links_to_interconnector = \
+    #    interconnectors.create_from_region_mnsp_region_requirement_constraints(
+    #   mnsp_link_indexes, mnsp_inter, mnsp_to_region_segments, max_con_index)
 
     # Create mnsp objective coefficients
     mnsp_objective_coefficients = interconnectors.create_mnsp_objective_coefficients(
