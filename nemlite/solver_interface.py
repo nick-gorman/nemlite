@@ -35,22 +35,19 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
 
     # Create a numpy array of the market variables and constraint matrix rows, this improves the efficiency of
     # adding constraints to the linear problem.
-    combined_constraints = combined_constraints.sort_values('ROWINDEX').reset_index()
     constraint_matrix = combined_constraints.pivot('ROWINDEX', 'INDEX', 'LHSCOEFFICIENTS')
     constraint_matrix = constraint_matrix.sort_index(axis=1)
     row_indices = np.asarray(constraint_matrix.index)
-    constraint_matrix = np.asarray(constraint_matrix)
-    # constraint_dict = {g: s.tolist() for g, s in combined_constraints['LHSCOEFFICIENTSVARS'].groupby('ROWINDEX')}
+    constraint_matrix_np = np.asarray(constraint_matrix)
     rhs = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['RHSCONSTANT']))
     enq_type = dict(zip(rhs_and_inequality_types['ROWINDEX'], rhs_and_inequality_types['CONSTRAINTTYPE']))
     var_list = np.asarray([variables[k] for k in sorted(list(variables))])
-    for i in range(len(row_indices)):
+    for row, row_index in zip(constraint_matrix_np, row_indices):
         # Record the mapping between the index used to name a constraint internally to the pulp code and the row
         # index it is given in nemlite. This mapping allows constraints to be identified by the nemlite index and
         # modified later.
-        new_constraint = make_constraint(var_list, constraint_matrix[i], rhs[row_indices[i]], enq_type[row_indices[i]],
-                                         marginal_offset=0)
-        prob.add_constr(new_constraint, name=str(i))
+        new_constraint = make_constraint(var_list, row, rhs[row_index], enq_type[row_index], marginal_offset=0)
+        prob.add_constr(new_constraint, name=str(row_index))
 
     # Dicts to store results on a run basis, a base run, and pricing run for each region.
     dispatches = {}
@@ -80,11 +77,10 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
     for region in regions_to_price:
         prob_marginal = prob
         row_index = get_region_load_constraint_index(region_req_by_row, region)
-        mip_row_index = np.argwhere(row_indices == row_index)[0][0]
-        old_constraint_index = get_con_by_name(prob_marginal.constrs, str(mip_row_index))
+        old_constraint_index = get_con_by_name(prob_marginal.constrs, str(row_index))
         old_constraint = prob_marginal.constrs[old_constraint_index]
         prob_marginal.remove(old_constraint)
-        new_constraint = make_constraint(var_list, constraint_matrix[mip_row_index], rhs[row_index],
+        new_constraint = make_constraint(var_list, constraint_matrix.loc[row_index, :].values, rhs[row_index],
                                          enq_type[row_index], marginal_offset=1)
         prob_marginal.add_constr(new_constraint, name='blah')
         prob_marginal.optimize()
@@ -95,9 +91,9 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
         new_constraint_index = get_con_by_name(prob_marginal.constrs, 'blah')
         new_constraint = prob_marginal.constrs[new_constraint_index]
         prob_marginal.remove(new_constraint)
-        old_constraint = make_constraint(var_list, constraint_matrix[mip_row_index], rhs[row_index],
+        old_constraint = make_constraint(var_list, constraint_matrix.loc[row_index, :].values, rhs[row_index],
                                          enq_type[row_index], marginal_offset=0)
-        prob_marginal.add_constr(old_constraint, name=str(mip_row_index))
+        prob_marginal.add_constr(old_constraint, name=str(row_index))
     return dispatches, inter_flows
 
 
