@@ -326,11 +326,11 @@ def create_from_region_mnsp_region_requirement_constraints(mnsp_link_indexes, mn
     mnsp_segments = pd.merge(mnsp_segments, mnsp_inter, 'inner', left_on=['INTERCONNECTORID', 'REGIONID'],
                              right_on=['INTERCONNECTORID', 'FROMREGION'])
     mnsp_segments = mnsp_segments.loc[:, ['INDEX', 'ROWINDEX']]
-    mnsp_segments['LHSCOEFFICIENTS'] = 0
+    mnsp_segments['LHSCOEFFICIENTS'] = 1
     mnsp_segments['CONSTRAINTTYPE'] = '='
     mnsp_segments['RHSCONSTANT'] = 0
     link_and_inter_data = link_and_inter_data.loc[:, ['INDEX', 'ROWINDEX']]
-    link_and_inter_data['LHSCOEFFICIENTS'] = 1
+    link_and_inter_data['LHSCOEFFICIENTS'] = - 1
     link_and_inter_data['CONSTRAINTTYPE'] = '='
     link_and_inter_data['RHSCONSTANT'] = 0
     constraints = pd.concat([mnsp_segments, link_and_inter_data])
