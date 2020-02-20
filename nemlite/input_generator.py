@@ -5,6 +5,7 @@ from nemosis import defaults
 from nemosis import query_wrapers
 from datetime import datetime, timedelta
 from nemlite import nemlite_defaults
+from nemlite import engine
 
 
 def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtered_data_folder, run_pre_filter=True):
@@ -28,18 +29,50 @@ def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtere
 
 def actual_inputs_generator(date_time_iterator, filtered_data_folder):
     for date_time in date_time_iterator:
-        datetime_name = date_time.replace('/', '')
-        datetime_name = datetime_name.replace(" ", "_")
-        datetime_name = datetime_name.replace(":", "")
-        input_tables = load_and_merge(datetime_name, filtered_data_folder)
+        yield load_from_datetime(date_time, filtered_data_folder)
 
-        yield input_tables['generator_information'], input_tables['capacity_bids'], input_tables['initial_conditions'],\
-            input_tables['interconnectors'], input_tables['demand'], input_tables['price_bids'], \
-            input_tables['interconnector_segments'], input_tables['connection_point_constraints'], \
-            input_tables['interconnector_constraints'], input_tables['constraint_data'], \
-            input_tables['region_constraints'], date_time, input_tables['interconnector_dynamic_loss_coefficients'],\
-            input_tables['market_interconnectors'], input_tables['market_interconnector_price_bids'], \
-            input_tables['market_interconnector_capacity_bids'], input_tables['price_cap_and_floor']
+
+def load_from_datetime(date_time, filtered_data_folder):
+    datetime_name = date_time.replace('/', '')
+    datetime_name = datetime_name.replace(" ", "_")
+    datetime_name = datetime_name.replace(":", "")
+    input_tables = load_and_merge(datetime_name, filtered_data_folder)
+
+    return input_tables['generator_information'], input_tables['capacity_bids'], input_tables['initial_conditions'], \
+           input_tables['interconnectors'], input_tables['demand'], input_tables['price_bids'], \
+           input_tables['interconnector_segments'], input_tables['connection_point_constraints'], \
+           input_tables['interconnector_constraints'], input_tables['constraint_data'], \
+           input_tables['region_constraints'], date_time, input_tables['interconnector_dynamic_loss_coefficients'], \
+           input_tables['market_interconnectors'], input_tables['market_interconnector_price_bids'], \
+           input_tables['market_interconnector_capacity_bids'], input_tables['price_cap_and_floor']
+
+
+def run_datetime(date_time, filtered_data_folder):
+
+    gen_info_raw, capacity_bids_raw, initial_conditions, inter_direct_raw, region_req_raw, price_bids_raw, \
+    inter_seg_definitions, con_point_constraints, inter_gen_constraints, gen_con_data, region_constraints, \
+    timestamp, inter_demand_coefficients, mnsp_inter, mnsp_price_bids, mnsp_capacity_bids, \
+    market_cap_and_floor = load_from_datetime(date_time, filtered_data_folder)
+
+    try:
+        nemlite_results, dispatches, inter_flows = engine.run(gen_info_raw, capacity_bids_raw,
+                                                              initial_conditions,
+                                                              inter_direct_raw, region_req_raw, price_bids_raw,
+                                                              inter_seg_definitions, con_point_constraints,
+                                                              inter_gen_constraints, gen_con_data,
+                                                              region_constraints, inter_demand_coefficients,
+                                                              mnsp_inter, mnsp_price_bids, mnsp_capacity_bids,
+                                                              market_cap_and_floor)
+        nemlite_results['DateTime'] = timestamp
+        dispatches['BASERUN']['DateTime'] = timestamp
+        inter_flows['BASERUN']['DateTime'] = timestamp
+    except:
+        print('Dispatch failed for {}'.format(timestamp))
+        nemlite_results = pd.DataFrame()
+        dispatches = {'BASERUN': pd.DataFrame()}
+        inter_flows = {'BASERUN': pd.DataFrame()}
+
+    return nemlite_results, dispatches, inter_flows
 
 
 def run_pf(table, start_time, end_time, raw_aemo_data_folder, filtered_data_folder):
@@ -66,7 +99,7 @@ def load_and_merge(date_time_name, filtered_data):
         else:
             print('Parent table left unmerged')
 
-    #child_tables['interconnector_segments'] = \
+    # child_tables['interconnector_segments'] = \
     #    child_tables['interconnector_segments'][~child_tables['interconnector_segments']['INTERCONNECTORID']
     #    .isin(child_tables['interconnectors'][child_tables['interconnectors']['ICTYPE'] == 'MNSP']['INTERCONNECTORID'])]
 
@@ -74,7 +107,6 @@ def load_and_merge(date_time_name, filtered_data):
 
 
 def pre_filter(start_time, end_time, table, date_time_sequence, raw_data_location, filtered_data):
-
     if 'INTERVENTION' in defaults.table_columns[table]:
         filter_cols = ['INTERVENTION']
         filter_values = [['0']]
@@ -92,7 +124,10 @@ def pre_filter(start_time, end_time, table, date_time_sequence, raw_data_locatio
         datetime_name = datetime_name.replace(":", "")
         date_time_specific_data = filter_map[table](all_data, save_location_formated, date_time, datetime_name, table)
         if nemlite_defaults.required_cols[table] is not None:
-            date_time_specific_data = date_time_specific_data.loc[:, nemlite_defaults.required_cols[table]]
+            try:
+                date_time_specific_data = date_time_specific_data.loc[:, nemlite_defaults.required_cols[table]]
+            except:
+                x=1
         date_time_specific_data.to_csv(save_location_formated.format(table, datetime_name), sep=',', index=False,
                                        date_format='%Y/%m/%d %H:%M:%S')
 
@@ -189,8 +224,8 @@ def effective_date_and_version_filter_for_inter_seg(data, save_location_formated
     data = query_wrapers.most_recent_records_before_start_time(data, date_time, table_name)
     data = most_recent_version(data, table_name, group_cols)
     data = data.drop_duplicates(['EFFECTIVEDATE', 'INTERCONNECTORID', 'VERSIONNO', 'LOSSSEGMENT'])
-    #data = data.loc[:, ('EFFECTIVEDATE', 'INTERCONNECTORID', 'VERSIONNO')]
-    #data = pd.merge(data, data_orginal, 'left', ['EFFECTIVEDATE', 'INTERCONNECTORID', 'VERSIONNO'])
+    # data = data.loc[:, ('EFFECTIVEDATE', 'INTERCONNECTORID', 'VERSIONNO')]
+    # data = pd.merge(data, data_orginal, 'left', ['EFFECTIVEDATE', 'INTERCONNECTORID', 'VERSIONNO'])
     return data
 
 
@@ -201,7 +236,7 @@ def start_date_end_date_filter(data, save_location_formated, date_time, datetime
     data = data[(data['START_DATE'] <= date_time) & (data['END_DATE'] > date_time)]
     data = data.sort_values('END_DATE').groupby(['DUID', 'START_DATE'], as_index=False).first()
     data = data.sort_values('START_DATE').groupby(['DUID'], as_index=False).first()
-    #data = query_wrapers.most_recent_records_before_start_time(data, date_time, table_name)
+    # data = query_wrapers.most_recent_records_before_start_time(data, date_time, table_name)
     return data
 
 
@@ -237,6 +272,7 @@ def derive_group_cols(table_name, date_col, also_exclude=None):
     group_cols = [column for column in defaults.table_primary_keys[table_name] if column not in exclude_from_group_cols]
     return group_cols
 
+
 filter_map = {'SPDCONNECTIONPOINTCONSTRAINT': constraint_filter,
               'GENCONDATA': constraint_filter,
               'SPDINTERCONNECTORCONSTRAINT': constraint_filter,
@@ -257,7 +293,3 @@ filter_map = {'SPDCONNECTIONPOINTCONSTRAINT': constraint_filter,
               'LOSSFACTORMODEL': effective_date_and_version_filter,
               'DISPATCHREGIONSUM': settlement_date_filter,
               'MARKET_PRICE_THRESHOLDS': effective_date_and_version_filter}
-
-
-
-

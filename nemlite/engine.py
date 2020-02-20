@@ -110,7 +110,7 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
 
     # For each segment of an interconnector assign it indexes such that its flows are attributed to the correct regions.
     req_row_indexes_for_inter = interconnectors.create_req_row_indexes_for_inter(inter_segments_loss_factors,
-                                                                                 region_req_by_row, inter_direct_raw)
+                                                                                 region_req_by_row)
 
     # Convert the loss percentages of interconnectors into contribution coefficients.
     req_row_indexes_coefficients_for_inter = interconnectors.convert_contribution_coefficients(

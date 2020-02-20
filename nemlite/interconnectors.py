@@ -111,7 +111,7 @@ def calc_bound_for_segment(actual_break_point, higher_break_point, lower_break_p
     return limit, mean_value
 
 
-def create_req_row_indexes_for_inter(inter_variable_indexes, req_row_indexes, inter_types):
+def create_req_row_indexes_for_inter(inter_variable_indexes, req_row_indexes):
     # Give each interconnector variable the correct requirement row indexes so it contributes to the correct regional
     # constraints.
 
@@ -266,7 +266,7 @@ def split_out_mnsp_to_region(all_inters, all_inter_data):
 def create_mnsp_link_indexes(mnsp_capacity_bids, max_var_index):
     # Create variable indexes for each link bid into the energy market. This is done by stacking, reindexing and saving
     # the off set index values as the row index colum.
-    cols_to_keep = ['LINKID', 'MAXAVAIL', 'RAMPUPRATE']
+    cols_to_keep = ['LINKID']#, 'MAXAVAIL', 'RAMPUPRATE']
     cols_to_stack = ['BANDAVAIL1', 'BANDAVAIL2', 'BANDAVAIL3', 'BANDAVAIL4', 'BANDAVAIL5', 'BANDAVAIL6', 'BANDAVAIL7',
                      'BANDAVAIL8', 'BANDAVAIL9', 'BANDAVAIL10']
     type_name = 'CAPACITYBAND'
