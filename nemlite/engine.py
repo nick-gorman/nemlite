@@ -326,7 +326,7 @@ def create_objective_coefficients(just_latest_price_bids, bids_all_data, duid_in
 
     # TODO: Check correct values for objective function
     # Increase costs of bids by their loss factors.
-    objective_coefficients[ns.col_bid_value] = np.where(objective_coefficients[ns.col_dispatch_type] == ns.type_energy,
+    objective_coefficients[ns.col_bid_value] = np.where(objective_coefficients['BIDTYPE'] == ns.type_energy,
                                                         # (
                                                         objective_coefficients[ns.col_bid_value] / \
                                                         objective_coefficients[ns.col_loss_factor],
@@ -538,9 +538,10 @@ def find_price(base_dispatch, increased_dispatch, gen_info_raw):
     marginal_dispatch = pd.merge(marginal_dispatch, gen_info_raw, 'inner', 'DUID')
     md = marginal_dispatch
     # Calculate the price after accounting for losses.
-    md['RELATIVEPRICE'] = np.where(md['BIDTYPE'] == 'ENERGY',
-                                   (md['PRICE'] / (md['TRANSMISSIONLOSSFACTOR'] * md['DISTRIBUTIONLOSSFACTOR'])),
-                                   md['PRICE'])
+    # md['RELATIVEPRICE'] = np.where(md['BIDTYPE'] == 'ENERGY',
+    #                                (md['PRICE'] / (md['TRANSMISSIONLOSSFACTOR'] * md['DISTRIBUTIONLOSSFACTOR'])),
+    #                                md['PRICE'])
+    md['RELATIVEPRICE'] = md['PRICE']
     # Find the marginal cost of each each marginal generator.
     md['MARGINALCOST'] = md['DISPATCHCHANGE'] * md['RELATIVEPRICE']
     # Sum the marginal cost of each generator to find the total marginal costs.
