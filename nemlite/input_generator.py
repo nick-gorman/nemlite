@@ -14,17 +14,19 @@ def actual_inputs_replicator(start_time, end_time, raw_aemo_data_folder, filtere
     delta = timedelta(minutes=5)
     start_time_obj = datetime.strptime(start_time, '%Y/%m/%d %H:%M:%S')
     end_time_obj = datetime.strptime(end_time, '%Y/%m/%d %H:%M:%S')
-    date_times_generator_2 = datetime_dispatch_sequence(start_time_obj, end_time_obj, delta)
-
+    date_times = datetime_dispatch_sequence(start_time_obj, end_time_obj, delta)
     if run_pre_filter:
-        # Pre filter dispatch constraint first as some tables are filtered based of its filtered files.
-        run_pf('DISPATCHCONSTRAINT', start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
-        # Pre filter the rest of the tables.
-        for table in nemlite_defaults.parent_tables:
-            if table != 'DISPATCHCONSTRAINT':
-                run_pf(table, start_time, end_time, raw_aemo_data_folder, filtered_data_folder)
+        pre_filter_all_tables(date_times, raw_aemo_data_folder, filtered_data_folder)
+    return actual_inputs_generator(date_times, filtered_data_folder)
 
-    return actual_inputs_generator(date_times_generator_2, filtered_data_folder)
+
+def pre_filter_all_tables(date_times, raw_aemo_data_folder, filtered_data_folder):
+    # Pre filter dispatch constraint first as some tables are filtered based of its filtered files.
+    pre_filter('DISPATCHCONSTRAINT', date_times, raw_aemo_data_folder, filtered_data_folder)
+    # Pre filter the rest of the tables.
+    for table in nemlite_defaults.parent_tables:
+        if table != 'DISPATCHCONSTRAINT':
+            pre_filter(table, date_times, raw_aemo_data_folder, filtered_data_folder)
 
 
 def actual_inputs_generator(date_time_iterator, filtered_data_folder):
@@ -54,33 +56,25 @@ def run_datetime(date_time, filtered_data_folder):
     timestamp, inter_demand_coefficients, mnsp_inter, mnsp_price_bids, mnsp_capacity_bids, \
     market_cap_and_floor = load_from_datetime(date_time, filtered_data_folder)
 
-    try:
-        nemlite_results, dispatches, inter_flows = engine.run(gen_info_raw, capacity_bids_raw,
-                                                              initial_conditions,
-                                                              inter_direct_raw, region_req_raw, price_bids_raw,
-                                                              inter_seg_definitions, con_point_constraints,
-                                                              inter_gen_constraints, gen_con_data,
-                                                              region_constraints, inter_demand_coefficients,
-                                                              mnsp_inter, mnsp_price_bids, mnsp_capacity_bids,
-                                                              market_cap_and_floor)
-        nemlite_results['DateTime'] = timestamp
-        dispatches['BASERUN']['DateTime'] = timestamp
-        inter_flows['BASERUN']['DateTime'] = timestamp
-    except:
-        print('Dispatch failed for {}'.format(timestamp))
-        nemlite_results = pd.DataFrame()
-        dispatches = {'BASERUN': pd.DataFrame()}
-        inter_flows = {'BASERUN': pd.DataFrame()}
+    #try:
+    nemlite_results, dispatches, inter_flows = engine.run(gen_info_raw, capacity_bids_raw,
+                                                          initial_conditions,
+                                                          inter_direct_raw, region_req_raw, price_bids_raw,
+                                                          inter_seg_definitions, con_point_constraints,
+                                                          inter_gen_constraints, gen_con_data,
+                                                          region_constraints, inter_demand_coefficients,
+                                                          mnsp_inter, mnsp_price_bids, mnsp_capacity_bids,
+                                                          market_cap_and_floor)
+    nemlite_results['DateTime'] = timestamp
+    dispatches['BASERUN']['DateTime'] = timestamp
+    inter_flows['BASERUN']['DateTime'] = timestamp
+    #except:
+        #print('Dispatch failed for {}'.format(timestamp))
+        #nemlite_results = pd.DataFrame()
+        #dispatches = {'BASERUN': pd.DataFrame()}
+        #inter_flows = {'BASERUN': pd.DataFrame()}
 
     return nemlite_results, dispatches, inter_flows
-
-
-def run_pf(table, start_time, end_time, raw_aemo_data_folder, filtered_data_folder):
-    start_time_obj = datetime.strptime(start_time, '%Y/%m/%d %H:%M:%S')
-    end_time_obj = datetime.strptime(end_time, '%Y/%m/%d %H:%M:%S')
-    delta = timedelta(minutes=5)
-    date_times_generator_1 = datetime_dispatch_sequence(start_time_obj, end_time_obj, delta)
-    pre_filter(start_time, end_time, table, date_times_generator_1, raw_aemo_data_folder, filtered_data_folder)
 
 
 def load_and_merge(date_time_name, filtered_data):
@@ -106,7 +100,7 @@ def load_and_merge(date_time_name, filtered_data):
     return child_tables
 
 
-def pre_filter(start_time, end_time, table, date_time_sequence, raw_data_location, filtered_data):
+def pre_filter(table, date_time_sequence, raw_data_location, filtered_data):
     if 'INTERVENTION' in defaults.table_columns[table]:
         filter_cols = ['INTERVENTION']
         filter_values = [['0']]
@@ -114,20 +108,23 @@ def pre_filter(start_time, end_time, table, date_time_sequence, raw_data_locatio
         filter_cols = None
         filter_values = None
 
+    sorted_date_times = sorted(date_time_sequence)
+    start_time = sorted_date_times[0]
+    start_time_obj = datetime.strptime(start_time, '%Y/%m/%d %H:%M:%S') - timedelta(minutes=5)
+    start_time = start_time_obj.isoformat().replace('T', ' ').replace('-', '/')
+    end_time = sorted_date_times[-1]
     all_data = data_fetch_methods.method_map[table](start_time, end_time, table, raw_data_location,
                                                     filter_cols=filter_cols, filter_values=filter_values)
 
     save_location_formated = filtered_data + '/{}_{}.csv'
-    for date_time in date_time_sequence:
+    for date_time in sorted_date_times:
         datetime_name = date_time.replace('/', '')
         datetime_name = datetime_name.replace(" ", "_")
         datetime_name = datetime_name.replace(":", "")
         date_time_specific_data = filter_map[table](all_data, save_location_formated, date_time, datetime_name, table)
         if nemlite_defaults.required_cols[table] is not None:
-            try:
-                date_time_specific_data = date_time_specific_data.loc[:, nemlite_defaults.required_cols[table]]
-            except:
-                x=1
+            date_time_specific_data = date_time_specific_data.loc[:, nemlite_defaults.required_cols[table]]
+
         date_time_specific_data.to_csv(save_location_formated.format(table, datetime_name), sep=',', index=False,
                                        date_format='%Y/%m/%d %H:%M:%S')
 
@@ -258,11 +255,13 @@ def most_recent_version(data, table_name, group_cols):
 def datetime_dispatch_sequence(start_time, end_time, delta):
     # Generator to produce time stamps at set intervals. Requires a datetime object as an input, but outputs
     # the date time as string formatted as 'YYYY/MM/DD HH:MM:SS'.
+    date_times = []
     curr = start_time + delta
     while curr <= end_time:
         # Change the datetime object to a timestamp and modify it format by replacing characters.
-        yield curr.isoformat().replace('T', ' ').replace('-', '/')
+        date_times.append(curr.isoformat().replace('T', ' ').replace('-', '/'))
         curr += delta
+    return date_times
 
 
 def derive_group_cols(table_name, date_col, also_exclude=None):

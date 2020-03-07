@@ -272,7 +272,7 @@ def apply_fcas_enablement_criteria(capacity_bids, initial_conditions):
 
     available_for_fcas = available_for_fcas[
         (available_for_fcas['ENABLEMENTMIN'] <= available_for_fcas['MAXENERGY']) |
-        (available_for_fcas['BIDTYPE'] == 'ENERGY')]
+        (available_for_fcas['BIDTYPE'] == 'ENERGY') | available_for_fcas['MAXENERGY'].isnull()]
 
     available_for_fcas = available_for_fcas[(available_for_fcas['AGCSTATUS'] == 1)
                                             | ((available_for_fcas['BIDTYPE'] != 'LOWERREG')

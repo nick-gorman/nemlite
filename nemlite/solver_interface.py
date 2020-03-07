@@ -67,6 +67,7 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
         # Attempt find constraint causing infeasibility.
         con_index = find_problem_constraint(base_prob)
         print('Couldn\'t find an optimal solution, but removing con {} fixed INFEASIBLITY'.format(con_index))
+        raise ValueError('Linear program infeasible')
 
     # Save base case results
     bid_bounds = outputs(bid_bounds)
@@ -131,13 +132,15 @@ def get_region_load_constraint_index(region_req_by_row, region):
 
 
 def find_problem_constraint(base_prob):
+    cons = []
     for con in base_prob.constrs:
         con_index = con.name
-        base_prob.remove(con)
-        status = base_prob.optimize()
+        test_prob = base_prob.copy()
+        test_prob.remove(con)
+        status = test_prob.optimize()
         if status == OptimizationStatus.OPTIMAL:
-            break
-    return con_index
+            cons.append(con_index)
+    return cons
 
 
 def outputs(var_definitions):

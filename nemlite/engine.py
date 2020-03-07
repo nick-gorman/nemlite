@@ -270,14 +270,15 @@ def create_generic_constraints(connection_point_constraints, inter_constraints, 
     type_and_rhs = hf.save_index(type_and_rhs.reset_index(drop=True), 'ROWINDEX', index_offset + 1)
 
     # Make the row index into the combined constraints dataframe.
-    combined_constraints = pd.merge(combined_constraints, type_and_rhs, 'inner', 'GENCONID')
+    combined_constraints = pd.merge(combined_constraints, type_and_rhs.loc[:, ['GENCONID', 'ROWINDEX']], 'inner', 'GENCONID')
     # Keep explicit duid constraints over those implied via regional constraints.
-    just_duid_combined_cons = combined_constraints[combined_constraints['INDEX'].isin(bids_and_indexes['INDEX'])]
-    just_duid_combined_cons = just_duid_combined_cons.sort_values('DUID')
-    just_duid_combined_cons = just_duid_combined_cons.groupby(['INDEX', 'ROWINDEX'], as_index=False).first()
-    just_non_duid_combined_cons = combined_constraints[~combined_constraints['INDEX'].isin(bids_and_indexes['INDEX'])]
-    combined_constraints = pd.concat([just_duid_combined_cons, just_non_duid_combined_cons], sort=False)
+    # just_duid_combined_cons = combined_constraints[combined_constraints['INDEX'].isin(bids_and_indexes['INDEX'])]
+    # just_duid_combined_cons = just_duid_combined_cons.sort_values('DUID')
+    # just_duid_combined_cons = just_duid_combined_cons.groupby(['INDEX', 'ROWINDEX'], as_index=False).first()
+    # just_non_duid_combined_cons = combined_constraints[~combined_constraints['INDEX'].isin(bids_and_indexes['INDEX'])]
+    # combined_constraints = pd.concat([just_duid_combined_cons, just_non_duid_combined_cons], sort=False)
     # Select just data needed for the constraint matrix.
+    combined_constraints = combined_constraints.groupby(['INDEX', 'ROWINDEX'], as_index=False).aggregate({'FACTOR': 'sum'})
     combined_constraints = combined_constraints.loc[:, ('INDEX', 'FACTOR', 'ROWINDEX')]
     # Rename columns to standard constrain matrix names.
     combined_constraints.columns = ['INDEX', 'LHSCOEFFICIENTS', 'ROWINDEX']
