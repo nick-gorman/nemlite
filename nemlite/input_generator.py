@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import numpy as np
 from nemosis import data_fetch_methods
 from nemosis import defaults
 from nemosis import query_wrapers
@@ -93,10 +94,6 @@ def load_and_merge(date_time_name, filtered_data):
         else:
             print('Parent table left unmerged')
 
-    # child_tables['interconnector_segments'] = \
-    #    child_tables['interconnector_segments'][~child_tables['interconnector_segments']['INTERCONNECTORID']
-    #    .isin(child_tables['interconnectors'][child_tables['interconnectors']['ICTYPE'] == 'MNSP']['INTERCONNECTORID'])]
-
     return child_tables
 
 
@@ -121,39 +118,42 @@ def pre_filter(table, date_time_sequence, raw_data_location, filtered_data):
         datetime_name = date_time.replace('/', '')
         datetime_name = datetime_name.replace(" ", "_")
         datetime_name = datetime_name.replace(":", "")
-        date_time_specific_data = filter_map[table](all_data, save_location_formated, date_time, datetime_name, table)
+        date_time_specific_data = filter_map[table](data=all_data, save_location_formated=save_location_formated,
+                                                    date_time=date_time, datetime_name=datetime_name, table_name=table)
         if nemlite_defaults.required_cols[table] is not None:
             date_time_specific_data = date_time_specific_data.loc[:, nemlite_defaults.required_cols[table]]
-
         date_time_specific_data.to_csv(save_location_formated.format(table, datetime_name), sep=',', index=False,
                                        date_format='%Y/%m/%d %H:%M:%S')
 
 
-def constraint_filter(constraint_data, save_location_formated, date_time, datetime_name, table_name):
+def constraint_filter(**kwargs):
+    data, date_time, table_name, save_location_formated, datetime_name = \
+        kwargs['data'], kwargs['date_time'], kwargs['table_name'], kwargs['save_location_formated'], \
+        kwargs['datetime_name']
     dispatch_cons_filename = save_location_formated.format('DISPATCHCONSTRAINT', datetime_name)
     dispatched_constraints = pd.read_csv(dispatch_cons_filename, dtype=str)
     merge_cols = ('GENCONID', 'EFFECTIVEDATE', 'VERSIONNO')
     dispatched_constraints = dispatched_constraints.loc[:, merge_cols]
     dispatched_constraints['EFFECTIVEDATE'] = pd.to_datetime(dispatched_constraints['EFFECTIVEDATE'])
-    filtered_constraints = pd.merge(dispatched_constraints, constraint_data, 'inner',
+    filtered_constraints = pd.merge(dispatched_constraints, data, 'inner',
                                     ['GENCONID', 'EFFECTIVEDATE', 'VERSIONNO'])
     filtered_constraints = filtered_constraints.drop_duplicates(defaults.table_primary_keys[table_name])
-
     return filtered_constraints
 
 
-def settlement_date_filter(data, save_location_formated, date_time, datetime_name, table_name):
+def settlement_date_filter(**kwargs):
+    data, date_time, table_name = kwargs['data'], kwargs['date_time'], kwargs['table_name']
     date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
     data['SETTLEMENTDATE'] = pd.to_datetime(data['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
     data = data[(data['SETTLEMENTDATE'] == date_time)]
     if table_name == 'DISPATCHCONSTRAINT':
         data = data.loc[:, ('CONSTRAINTID', 'RHS', 'GENCONID_VERSIONNO', 'GENCONID_EFFECTIVEDATE')]
         data.columns = ['GENCONID', 'RHS', 'VERSIONNO', 'EFFECTIVEDATE']
-
     return data
 
 
-def interval_datetime_filter(data, save_location_formated, date_time, datetime_name, table_name):
+def interval_datetime_filter(**kwargs):
+    data, date_time, table_name = kwargs['data'], kwargs['date_time'], kwargs['table_name']
     date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
     data['INTERVAL_DATETIME'] = pd.to_datetime(data['INTERVAL_DATETIME'], format='%Y/%m/%d %H:%M:%S')
     data = data[(data['INTERVAL_DATETIME'] == date_time)]
@@ -164,7 +164,8 @@ def interval_datetime_filter(data, save_location_formated, date_time, datetime_n
     return data
 
 
-def half_hour_peroids(data, save_location_formated, date_time, datetime_name, table_name):
+def half_hour_periods(**kwargs):
+    data, date_time, table_name = kwargs['data'], kwargs['date_time'], kwargs['table_name']
     date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
     data['SETTLEMENTDATE'] = pd.to_datetime(data['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
     data = data[(data['SETTLEMENTDATE'] > date_time) & (data['SETTLEMENTDATE'] - timedelta(minutes=30) <= date_time)]
@@ -173,7 +174,8 @@ def half_hour_peroids(data, save_location_formated, date_time, datetime_name, ta
     return data
 
 
-def settlement_just_date_filter(data, save_location_formated, date_time, datetime_name, table_name):
+def settlement_just_date_filter(**kwargs):
+    data, date_time = kwargs['data'], kwargs['date_time']
     date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
     date_time = date_time - timedelta(hours=4, seconds=1)
     date = date_time.replace(hour=0, minute=0, second=0)
@@ -182,7 +184,8 @@ def settlement_just_date_filter(data, save_location_formated, date_time, datetim
     return data
 
 
-def settlement_just_date_and_version_filter(data, save_location_formated, date_time, datetime_name, table_name):
+def settlement_just_date_and_version_filter(**kwargs):
+    data, date_time, table_name = kwargs['data'], kwargs['date_time'], kwargs['table_name']
     date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
     date_time = date_time - timedelta(hours=4, seconds=1)
     date = date_time.replace(hour=0, minute=0, second=0)
@@ -193,7 +196,8 @@ def settlement_just_date_and_version_filter(data, save_location_formated, date_t
     return data
 
 
-def effective_date_filter(data, save_location_formated, date_time, datetime_name, table_name):
+def effective_date_filter(**kwargs):
+    data, date_time, table_name = kwargs['data'], kwargs['date_time'], kwargs['table_name']
     date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
     data['EFFECTIVEDATE'] = pd.to_datetime(data['EFFECTIVEDATE'], format='%Y/%m/%d %H:%M:%S')
     data = data[data['EFFECTIVEDATE'] <= date_time]
@@ -202,7 +206,8 @@ def effective_date_filter(data, save_location_formated, date_time, datetime_name
     return data
 
 
-def effective_date_and_version_filter(data, save_location_formated, date_time, datetime_name, table_name):
+def effective_date_and_version_filter(**kwargs):
+    data, date_time, table_name = kwargs['data'], kwargs['date_time'], kwargs['table_name']
     date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
     data['EFFECTIVEDATE'] = pd.to_datetime(data['EFFECTIVEDATE'], format='%Y/%m/%d %H:%M:%S')
     data = data[data['EFFECTIVEDATE'] <= date_time]
@@ -212,7 +217,8 @@ def effective_date_and_version_filter(data, save_location_formated, date_time, d
     return data
 
 
-def effective_date_and_version_filter_for_inter_seg(data, save_location_formated, date_time, datetime_name, table_name):
+def effective_date_and_version_filter_for_inter_seg(**kwargs):
+    data, date_time, table_name = kwargs['data'], kwargs['date_time'], kwargs['table_name']
     data_orginal = data.copy()
     date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
     data['EFFECTIVEDATE'] = pd.to_datetime(data['EFFECTIVEDATE'], format='%Y/%m/%d %H:%M:%S')
@@ -226,7 +232,8 @@ def effective_date_and_version_filter_for_inter_seg(data, save_location_formated
     return data
 
 
-def start_date_end_date_filter(data, save_location_formated, date_time, datetime_name, table_name):
+def start_date_end_date_filter(**kwargs):
+    data, date_time = kwargs['data'], kwargs['date_time']
     date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
     data['START_DATE'] = pd.to_datetime(data['START_DATE'], format='%Y/%m/%d %H:%M:%S')
     data['END_DATE'] = pd.to_datetime(data['END_DATE'], format='%Y/%m/%d %H:%M:%S')
@@ -237,7 +244,72 @@ def start_date_end_date_filter(data, save_location_formated, date_time, datetime
     return data
 
 
-def no_filter(data, save_location_formated, date_time, datetime_name, table_name):
+def no_filter(**kwargs):
+    return kwargs['data']
+
+
+def filter_dispatch_load(**kwargs):
+    """
+    Calculates the time since a fast start unit received instructions to commit. Filters to single dispatch interval.
+
+    :keyword data: DataFrame
+        SETTLEMENTDATE: pandas.Timestamp
+            The dispatch interval the row pertains to.
+        DUID: str
+            The dispatch unit the row pertains to.
+        DISPATCHMODE: str
+            The stage of dispatch inflexibility profile the unit is in, can be 0, 1, 2, 3, 4.
+        Other columns will be present but are not used by this function.
+    :keyword date_time:
+    :return: data: DataFrame
+        SETTLEMENTDATE: pandas.Timestamp
+            The dispatch interval the row pertains to.
+        DUID: str
+            The dispatch unit the row pertains to.
+        DISPATCHMODE: str
+            The stage of dispatch inflexibility profile the unit is in, can be 0, 1, 2, 3, 4.
+        TIMESINCECOMMITMENT: float
+            The time in minutes since the start of the dispatch interval in which the unit was committed. If the unit is
+            in dispatch mode 0 then this number is 0, but has not meaning.
+        Other columns will be present but are not used by this function.
+    """
+    data, date_time = kwargs['data'], kwargs['date_time']
+    date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
+    data['SETTLEMENTDATE'] = pd.to_datetime(data['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
+
+    # Split data based on processing needed.
+    units_in_dispatch_mode_0 = data[(data['DISPATCHMODE'] == '0') & (data['SETTLEMENTDATE'] == date_time)]['DUID']
+    units_in_dispatch_mode_0 = data[data['DUID'].isin(units_in_dispatch_mode_0)]
+    units_not_in_dispatch_mode_0 = data[(data['DISPATCHMODE'] != '0') & (data['SETTLEMENTDATE'] == date_time)]['DUID']
+    units_not_in_dispatch_mode_0 = data[data['DUID'].isin(units_not_in_dispatch_mode_0)]
+
+    # For units in dispatch mode 0 just set TIMESINCECOMMITMMENT to 0.
+    units_in_dispatch_mode_0['TIMESINCECOMMITMENT'] = 0
+    units_in_dispatch_mode_0 = units_in_dispatch_mode_0[units_in_dispatch_mode_0['SETTLEMENTDATE'] == date_time]
+
+    # For units not in dispatch mode 0, calculate the time since they last were in mode 0. Limiting search to a maximum
+    # of 60 minutes.
+    commitment_time_by_unit = units_not_in_dispatch_mode_0[units_not_in_dispatch_mode_0['DISPATCHMODE'] == '0']
+    commitment_time_by_unit = commitment_time_by_unit[
+        commitment_time_by_unit['SETTLEMENTDATE'] >= date_time - timedelta(minutes=60)]
+    commitment_time_by_unit = commitment_time_by_unit.groupby('DUID', as_index=False).\
+        aggregate({'SETTLEMENTDATE': 'max'})
+    commitment_time_by_unit.columns = ['DUID', 'COMMITMENTTIME']
+    units_not_in_dispatch_mode_0 = units_not_in_dispatch_mode_0[
+        units_not_in_dispatch_mode_0['SETTLEMENTDATE'] == date_time]
+    units_not_in_dispatch_mode_0 = pd.merge(units_not_in_dispatch_mode_0, commitment_time_by_unit, 'left', 'DUID')
+    units_not_in_dispatch_mode_0['TIMESINCECOMMITMENT'] = units_not_in_dispatch_mode_0['SETTLEMENTDATE'] - \
+        units_not_in_dispatch_mode_0['COMMITMENTTIME']
+    units_not_in_dispatch_mode_0['TIMESINCECOMMITMENT'] = np.where(
+        units_not_in_dispatch_mode_0['TIMESINCECOMMITMENT'].isnull(), timedelta(minutes=60),
+        units_not_in_dispatch_mode_0['TIMESINCECOMMITMENT'])
+    units_not_in_dispatch_mode_0['TIMESINCECOMMITMENT'] = \
+        pd.to_timedelta(units_not_in_dispatch_mode_0['TIMESINCECOMMITMENT']).dt.total_seconds().div(60).astype(int)
+    cols_to_keep = [col for col in units_not_in_dispatch_mode_0 if col != 'COMMITMENTTIME']
+    units_not_in_dispatch_mode_0 = units_not_in_dispatch_mode_0.loc[:, cols_to_keep]
+
+    # Combined data
+    data = pd.concat([units_in_dispatch_mode_0, units_not_in_dispatch_mode_0])
     return data
 
 
@@ -286,7 +358,7 @@ filter_map = {'SPDCONNECTIONPOINTCONSTRAINT': constraint_filter,
               'SPDREGIONCONSTRAINT': constraint_filter,
               'BIDDAYOFFER_D': settlement_just_date_filter,
               'MNSP_DAYOFFER': settlement_just_date_and_version_filter,
-              'MNSP_PEROFFER': half_hour_peroids,
+              'MNSP_PEROFFER': half_hour_periods,
               'DISPATCHLOAD': settlement_date_filter,
               'LOSSMODEL': effective_date_and_version_filter_for_inter_seg,
               'LOSSFACTORMODEL': effective_date_and_version_filter,
