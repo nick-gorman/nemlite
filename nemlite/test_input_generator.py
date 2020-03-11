@@ -18,7 +18,7 @@ class TestFilterDispatchLoad(unittest.TestCase):
             'DUID': ['A', 'B'],
             'DISPATCHMODE': ['0', '0'],
             'SETTLEMENTDATE': ['2018/01/01 00:05:00', '2018/01/01 00:05:00'],
-            'TIMESINCECOMMITMENT': [0, 0]
+            'TIMESINCECOMMITMENT': [0.0, 0.0]
         })
         expected_output['SETTLEMENTDATE'] = pd.to_datetime(expected_output['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
         assert_frame_equal(output.reset_index(drop=True), expected_output.reset_index(drop=True))
@@ -36,7 +36,7 @@ class TestFilterDispatchLoad(unittest.TestCase):
             'DUID': ['A', 'B'],
             'DISPATCHMODE': ['1', '4'],
             'SETTLEMENTDATE': ['2018/01/01 00:05:00', '2018/01/01 00:05:00'],
-            'TIMESINCECOMMITMENT': [60, 60]
+            'TIMESINCECOMMITMENT': [60.0, 60.0]
         })
         expected_output['SETTLEMENTDATE'] = pd.to_datetime(expected_output['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
         assert_frame_equal(output.reset_index(drop=True), expected_output.reset_index(drop=True))
@@ -54,7 +54,7 @@ class TestFilterDispatchLoad(unittest.TestCase):
             'DUID': ['A', 'B'],
             'DISPATCHMODE': ['1', '4'],
             'SETTLEMENTDATE': ['2018/01/01 00:05:00', '2018/01/01 00:05:00'],
-            'TIMESINCECOMMITMENT': [5, 15]
+            'TIMESINCECOMMITMENT': [5.0, 15.0]
         })
         expected_output['SETTLEMENTDATE'] = pd.to_datetime(expected_output['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
         assert_frame_equal(output.reset_index(drop=True), expected_output.reset_index(drop=True))
@@ -73,7 +73,7 @@ class TestFilterDispatchLoad(unittest.TestCase):
             'DUID': ['A', 'B', 'C'],
             'DISPATCHMODE': ['0', '4', '2'],
             'SETTLEMENTDATE': ['2018/01/01 00:05:00', '2018/01/01 00:05:00', '2018/01/01 00:05:00'],
-            'TIMESINCECOMMITMENT': [0, 15, 60]
+            'TIMESINCECOMMITMENT': [0.0, 15.0, 60.0]
         })
         expected_output['SETTLEMENTDATE'] = pd.to_datetime(expected_output['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
         assert_frame_equal(output.reset_index(drop=True), expected_output.reset_index(drop=True))

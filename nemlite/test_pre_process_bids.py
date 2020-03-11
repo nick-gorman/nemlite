@@ -909,3 +909,126 @@ class TestFilterAndScale(unittest.TestCase):
         expected_output_data = expected_output_data.loc[:, output_data.columns]
         expected_output_data = expected_output_data.sort_values('DUID').reset_index(drop=True)
         assert_frame_equal(expected_output_data, output_data)
+
+
+class TestOverRideMaxAndMinEnergyForFastStartUnits(unittest.TestCase):
+    def test_a_unit_in_each_mode(self):
+        current_max_and_min = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'BIDTYPE': ['ENERGY', 'ENERGY', 'X', 'Y', 'Z'],
+            'MAXENERGY': [10, 11, 12, 13, 14],
+            'MINENERGY': [5, 6, 7, 8, 9],
+        })
+        initial_conditions = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'TIMESINCECOMMITMENT': [4, 5, 19, 19, 0]
+        })
+        dispatch_inflexibility_profiles = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'MINIMUMLOAD': [7, 5, 6, 4, 3],
+            'T1': [5, 4, 3, 2, 1],
+            'T2': [6, 7, 8, 9, 10],
+            'T3': [10, 9, 8, 7, 6],
+            'T4': [1, 2, 3, 4, 5]
+        })
+        expected_output = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'BIDTYPE': ['ENERGY', 'ENERGY', 'X', 'Y', 'Z'],
+            'MAXENERGY': [0.0, 5*(1/7), 12, 13, 14],
+            'MINENERGY': [0.0, 5*(1/7), 6, 4 - 4*(1/4), 9],
+        })
+        output = pre_process_bids.over_ride_max_and_min_energy_for_fast_start_units(current_max_and_min,
+                                                                                    initial_conditions,
+                                                                                    dispatch_inflexibility_profiles)
+        assert_frame_equal(output.reset_index(drop=True), expected_output.reset_index(drop=True))
+
+    def test_t4_over_run(self):
+        current_max_and_min = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'BIDTYPE': ['ENERGY', 'ENERGY', 'X', 'Y', 'Z'],
+            'MAXENERGY': [10, 11, 12, 13, 14],
+            'MINENERGY': [5, 6, 7, 8, 9],
+        })
+        initial_conditions = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'TIMESINCECOMMITMENT': [4, 5, 19, 50, 0]
+        })
+        dispatch_inflexibility_profiles = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'MINIMUMLOAD': [7, 5, 6, 4, 3],
+            'T1': [5, 4, 3, 2, 1],
+            'T2': [6, 7, 8, 9, 10],
+            'T3': [10, 9, 8, 7, 6],
+            'T4': [1, 2, 3, 4, 5]
+        })
+        expected_output = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'BIDTYPE': ['ENERGY', 'ENERGY', 'X', 'Y', 'Z'],
+            'MAXENERGY': [0.0, 5 * (1 / 7), 12, 13, 14],
+            'MINENERGY': [0.0, 5 * (1 / 7), 6, 0.0, 9],
+        })
+        output = pre_process_bids.over_ride_max_and_min_energy_for_fast_start_units(current_max_and_min,
+                                                                                    initial_conditions,
+                                                                                    dispatch_inflexibility_profiles)
+        assert_frame_equal(output.reset_index(drop=True), expected_output.reset_index(drop=True))
+
+    def test_each_duid_with_one_zero_segment(self):
+        current_max_and_min = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'BIDTYPE': ['ENERGY', 'ENERGY', 'X', 'Y', 'Z'],
+            'MAXENERGY': [10, 11, 12, 13, 14],
+            'MINENERGY': [5, 6, 7, 8, 9],
+        })
+        initial_conditions = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'TIMESINCECOMMITMENT': [4, 5, 19, 50, 0]
+        })
+        dispatch_inflexibility_profiles = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'MINIMUMLOAD': [7, 5, 6, 4, 3],
+            'T1': [0, 4, 3, 2, 1],
+            'T2': [6, 0, 8, 9, 10],
+            'T3': [10, 9, 0, 7, 6],
+            'T4': [1, 2, 3, 0, 5]
+        })
+        expected_output = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'BIDTYPE': ['ENERGY', 'ENERGY', 'X', 'Y', 'Z'],
+            'MAXENERGY': [7 * (4 / 6), 11.0, 12, 13, 14],
+            'MINENERGY': [7 * (4 / 6), 5, 0.0, 0.0, 9],
+        })
+        output = pre_process_bids.over_ride_max_and_min_energy_for_fast_start_units(current_max_and_min,
+                                                                                    initial_conditions,
+                                                                                    dispatch_inflexibility_profiles)
+        assert_frame_equal(output.reset_index(drop=True), expected_output.reset_index(drop=True))
+
+    def test_each_duid_with_one_zero_segment_alt_times(self):
+        current_max_and_min = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'BIDTYPE': ['ENERGY', 'ENERGY', 'X', 'Y', 'Z'],
+            'MAXENERGY': [10, 11, 12, 13, 14],
+            'MINENERGY': [5, 6, 7, 8, 9],
+        })
+        initial_conditions = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'TIMESINCECOMMITMENT': [6, 4, 11, 18, 0]
+        })
+        dispatch_inflexibility_profiles = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'MINIMUMLOAD': [7, 5, 6, 4, 3],
+            'T1': [0, 4, 3, 2, 1],
+            'T2': [6, 0, 8, 9, 10],
+            'T3': [10, 9, 0, 7, 6],
+            'T4': [1, 2, 3, 0, 5]
+        })
+        expected_output = pd.DataFrame({
+            'DUID': ['A', 'B', 'C', 'D', 'E'],
+            'BIDTYPE': ['ENERGY', 'ENERGY', 'X', 'Y', 'Z'],
+            'MAXENERGY': [7, 0.0, 6.0, 13, 14],
+            'MINENERGY': [7, 0.0, 6.0, 4.0, 9],
+        })
+        output = pre_process_bids.over_ride_max_and_min_energy_for_fast_start_units(current_max_and_min,
+                                                                                    initial_conditions,
+                                                                                    dispatch_inflexibility_profiles)
+        assert_frame_equal(output.reset_index(drop=True), expected_output.reset_index(drop=True))
+

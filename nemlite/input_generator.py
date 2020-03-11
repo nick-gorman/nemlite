@@ -276,6 +276,7 @@ def filter_dispatch_load(**kwargs):
     data, date_time = kwargs['data'], kwargs['date_time']
     date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
     data['SETTLEMENTDATE'] = pd.to_datetime(data['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
+    data = data[data['SETTLEMENTDATE'] <= date_time]
 
     # Split data based on processing needed.
     units_in_dispatch_mode_0 = data[(data['DISPATCHMODE'] == '0') & (data['SETTLEMENTDATE'] == date_time)]['DUID']
@@ -284,7 +285,7 @@ def filter_dispatch_load(**kwargs):
     units_not_in_dispatch_mode_0 = data[data['DUID'].isin(units_not_in_dispatch_mode_0)]
 
     # For units in dispatch mode 0 just set TIMESINCECOMMITMMENT to 0.
-    units_in_dispatch_mode_0['TIMESINCECOMMITMENT'] = 0
+    units_in_dispatch_mode_0['TIMESINCECOMMITMENT'] = 0.0
     units_in_dispatch_mode_0 = units_in_dispatch_mode_0[units_in_dispatch_mode_0['SETTLEMENTDATE'] == date_time]
 
     # For units not in dispatch mode 0, calculate the time since they last were in mode 0. Limiting search to a maximum
@@ -304,7 +305,7 @@ def filter_dispatch_load(**kwargs):
         units_not_in_dispatch_mode_0['TIMESINCECOMMITMENT'].isnull(), timedelta(minutes=60),
         units_not_in_dispatch_mode_0['TIMESINCECOMMITMENT'])
     units_not_in_dispatch_mode_0['TIMESINCECOMMITMENT'] = \
-        pd.to_timedelta(units_not_in_dispatch_mode_0['TIMESINCECOMMITMENT']).dt.total_seconds().div(60).astype(int)
+        pd.to_timedelta(units_not_in_dispatch_mode_0['TIMESINCECOMMITMENT']).dt.total_seconds().div(60).astype(float)
     cols_to_keep = [col for col in units_not_in_dispatch_mode_0 if col != 'COMMITMENTTIME']
     units_not_in_dispatch_mode_0 = units_not_in_dispatch_mode_0.loc[:, cols_to_keep]
 
