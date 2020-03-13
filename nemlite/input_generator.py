@@ -297,7 +297,7 @@ def filter_dispatch_load(**kwargs):
         aggregate({'SETTLEMENTDATE': 'max'})
     commitment_time_by_unit.columns = ['DUID', 'COMMITMENTTIME']
     units_not_in_dispatch_mode_0 = units_not_in_dispatch_mode_0[
-        units_not_in_dispatch_mode_0['SETTLEMENTDATE'] == date_time]
+       units_not_in_dispatch_mode_0['SETTLEMENTDATE'] == date_time]
     units_not_in_dispatch_mode_0 = pd.merge(units_not_in_dispatch_mode_0, commitment_time_by_unit, 'left', 'DUID')
     units_not_in_dispatch_mode_0['TIMESINCECOMMITMENT'] = units_not_in_dispatch_mode_0['SETTLEMENTDATE'] - \
         units_not_in_dispatch_mode_0['COMMITMENTTIME']
@@ -306,7 +306,8 @@ def filter_dispatch_load(**kwargs):
         units_not_in_dispatch_mode_0['TIMESINCECOMMITMENT'])
     units_not_in_dispatch_mode_0['TIMESINCECOMMITMENT'] = \
         pd.to_timedelta(units_not_in_dispatch_mode_0['TIMESINCECOMMITMENT']).dt.total_seconds().div(60).astype(float)
-    cols_to_keep = [col for col in units_not_in_dispatch_mode_0 if col != 'COMMITMENTTIME']
+
+    cols_to_keep = [col for col in units_not_in_dispatch_mode_0 if col not in ['COMMITMENTTIME', 'T1', 'T2', 'T3', 'T4']]
     units_not_in_dispatch_mode_0 = units_not_in_dispatch_mode_0.loc[:, cols_to_keep]
 
     # Combined data

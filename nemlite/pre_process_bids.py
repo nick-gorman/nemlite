@@ -348,8 +348,9 @@ def over_ride_max_and_min_energy_for_fast_start_units(current_max_and_min, initi
     """
 
     # Combine data frames together.
-    current_max_and_min = pd.merge(current_max_and_min,
-                                   initial_conditions.loc[:, ['DUID', 'TIMESINCECOMMITMENT']], 'left', 'DUID')
+    initial_conditions = initial_conditions.loc[:, ['DUID', 'TIMESINCECOMMITMENT', 'DISPATCHMODE']]
+    initial_conditions.columns = ['DUID', 'TIMESINCECOMMITMENT', 'DISPATCHMODEORG']
+    current_max_and_min = pd.merge(current_max_and_min, initial_conditions, 'left', 'DUID')
     current_max_and_min = pd.merge(current_max_and_min,
                                    dispatch_inflexibility_profiles.loc[:,
                                    ['DUID', 'MINIMUMLOAD', 'T1', 'T2', 'T3', 'T4']], 'left', 'DUID')
@@ -364,6 +365,13 @@ def over_ride_max_and_min_energy_for_fast_start_units(current_max_and_min, initi
     current_max_and_min['DISPATCHMODE'] = np.where(
         current_max_and_min['TIMESINCECOMMITMENT'] > current_max_and_min['T1'] + current_max_and_min['T2'] +
         current_max_and_min['T3'], 4, current_max_and_min['DISPATCHMODE'])
+
+    # Change starting max limit if unit below minimum load
+    current_max_and_min['MAXENERGY'] = np.where((current_max_and_min['INITIALMW'] < current_max_and_min['MINIMUMLOAD'])
+                                                & (current_max_and_min['DISPATCHMODE'] != 0),
+                                                current_max_and_min['LASTTOTALCLEARED'] +
+                                                current_max_and_min['RAMPUPRATE'] / 12,
+                                                current_max_and_min['MAXENERGY'])
 
     # Calculate the time left in the current dispatch mode.
     current_max_and_min['TREMANINING'] = np.where(current_max_and_min['DISPATCHMODE'] == 0, 0, 0)
@@ -394,6 +402,12 @@ def over_ride_max_and_min_energy_for_fast_start_units(current_max_and_min, initi
                                                     (current_max_and_min['T2'] - current_max_and_min['TREMANINING']) /
                                                     current_max_and_min['T2']),
                                                 current_max_and_min['MINENERGY'])
+    # current_max_and_min['MINENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 1,
+    #                                             current_max_and_min['TOTALCLEARED'],
+    #                                             current_max_and_min['MINENERGY'])
+    # current_max_and_min['MINENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 2,
+    #                                             current_max_and_min['TOTALCLEARED'],
+    #                                             current_max_and_min['MINENERGY'])
     current_max_and_min['MINENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 3,
                                                 current_max_and_min['MINIMUMLOAD'], current_max_and_min['MINENERGY'])
     current_max_and_min['MINENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 4,
@@ -416,9 +430,15 @@ def over_ride_max_and_min_energy_for_fast_start_units(current_max_and_min, initi
                                                     (current_max_and_min['T2'] - current_max_and_min['TREMANINING']) /
                                                     current_max_and_min['T2']),
                                                 current_max_and_min['MAXENERGY'])
+    # current_max_and_min['MAXENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 1,
+    #                                             current_max_and_min['TOTALCLEARED'],
+    #                                             current_max_and_min['MINENERGY'])
+    # current_max_and_min['MAXENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 2,
+    #                                             current_max_and_min['TOTALCLEARED'],
+    #                                             current_max_and_min['MINENERGY'])
 
     # Remove extra columns from max and min data frame.
-    cols_discard = ['TIMESINCECOMMITMENT', 'MINIMUMLOAD', 'T1', 'T2', 'T3', 'T4', 'TREMANINING']
+    cols_discard = ['TIMESINCECOMMITMENT', 'MINIMUMLOAD', 'T1', 'T2', 'T3', 'T4', 'TREMANINING', 'DISPATCHMODEORG']
     cols_to_keep = [col for col in current_max_and_min.columns if col not in cols_discard]
     current_max_and_min = current_max_and_min.loc[:, cols_to_keep]
     return current_max_and_min
