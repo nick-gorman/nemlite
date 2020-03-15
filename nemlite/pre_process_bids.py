@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 
-def filter_and_scale(capacity_bids, unit_solution):
+def filter_and_scale(capacity_bids, price_bids, unit_solution):
     # Fast start plants must conform to their dispatch profiles, therefore their maximum available energy are overridden
     # to match the dispatch profiles.
     # capacity_bids = over_ride_max_energy_for_fast_start_plants(capacity_bids.copy(), unit_solution, fast_start_gens)
@@ -11,6 +11,8 @@ def filter_and_scale(capacity_bids, unit_solution):
     # availability in the previous intervals unit solution and its a ramp rates.
     capacity_bids = add_max_unit_energy(capacity_bids, unit_solution)
     capacity_bids = add_min_unit_energy(capacity_bids, unit_solution)
+    capacity_bids = over_ride_max_and_min_energy_for_fast_start_units(capacity_bids, unit_solution,
+                                                                      price_bids)
 
     # If the maximum energy of a plant is below its minimum energy then reset the minimum energy to equal that maximum.
     # Note this means the plants is being constrained up by is minimum energy level.
@@ -296,7 +298,7 @@ def over_ride_max_energy_for_fast_start_plants(original_max_energy_constraints, 
     return max_energy_constraints
 
 
-def over_ride_max_and_min_energy_for_fast_start_units(current_max_and_min, initial_conditions,
+def over_ride_max_and_min_energy_for_fast_start_units(current_max_and_min,
                                                       dispatch_inflexibility_profiles):
     """
     Calculates the constraints on unit dispatch due to fast start inflexibility profiles.
@@ -310,30 +312,16 @@ def over_ride_max_and_min_energy_for_fast_start_units(current_max_and_min, initi
             The maximum level at which the unit can be dispatched.
         MINENERGY: float
             The minimum level at which the unit can be dispatched.
-        Other columns may be present but are not used or changed by this function.
-    :param initial_conditions: DataFrame
-        DUID: str
-            The dispatch unit the row pertains to.
-        TIMESINCECOMMITMENT: float
-            The number of minutes since the fast start unit received commitment instructions, max of 60 minutes. If the
-            unit is not in fast start mode then the value is always zero.
+        DISPATCHMODE: int
+            As determined by AEMO in historical dispatch.
+        TOTALCLEARED: int
+            As determined by AEMO in historical dispatch.
         Other columns may be present but are not used or changed by this function.
     :param dispatch_inflexibility_profiles: DataFrame
         DUID: str
             The dispatch unit the row pertains to.
         MINIMUMLOAD: float
             The minimum loading allowed for the unit during the T3 period of the dispatch inflexibility profile.
-        T1: float
-            The length of time taken for the unit to synchronise i.e. time between receiving commitment instructions
-            and first no zero target.
-        T2: float
-            The length time taken to ramp from to minimum loading level, dispatch target should follow a linear
-            trajectory between 0 and minimum loading level over this time.
-        T3: float
-            The length of time for which the minimum loading level applies.
-        T3: float
-            The time taken to ramp down from the minimum loading level to zero. The dispatch target should always be
-            greater than or equal to a linear trajectory between the minimum loading level and zero during this time.
         Other columns may be present but are not used or changed by this function.
     :return: DataFrame
         DUID: str
@@ -348,97 +336,52 @@ def over_ride_max_and_min_energy_for_fast_start_units(current_max_and_min, initi
     """
 
     # Combine data frames together.
-    initial_conditions = initial_conditions.loc[:, ['DUID', 'TIMESINCECOMMITMENT', 'DISPATCHMODE']]
-    initial_conditions.columns = ['DUID', 'TIMESINCECOMMITMENT', 'DISPATCHMODEORG']
-    current_max_and_min = pd.merge(current_max_and_min, initial_conditions, 'left', 'DUID')
     current_max_and_min = pd.merge(current_max_and_min,
                                    dispatch_inflexibility_profiles.loc[:,
-                                   ['DUID', 'MINIMUMLOAD', 'T1', 'T2', 'T3', 'T4']], 'left', 'DUID')
+                                   ['DUID', 'MINIMUMLOAD']], 'left', 'DUID')
+    # current_max_and_min = pd.merge(current_max_and_min,
+    #                                initial_cons.loc[:,
+    #                                ['DUID', 'TOTALCLEARED', 'INITIALMW', 'LASTTOTALCLEARED']], 'left', 'DUID')
 
-    # Calculate which dispatch mode the unit is currently in.
-    current_max_and_min['DISPATCHMODE'] = np.where(current_max_and_min['TIMESINCECOMMITMENT'] > 0, 1, 0)
-    current_max_and_min['DISPATCHMODE'] = np.where(
-        current_max_and_min['TIMESINCECOMMITMENT'] > current_max_and_min['T1'], 2, current_max_and_min['DISPATCHMODE'])
-    current_max_and_min['DISPATCHMODE'] = np.where(
-        current_max_and_min['TIMESINCECOMMITMENT'] > current_max_and_min['T1'] + current_max_and_min['T2'], 3,
-        current_max_and_min['DISPATCHMODE'])
-    current_max_and_min['DISPATCHMODE'] = np.where(
-        current_max_and_min['TIMESINCECOMMITMENT'] > current_max_and_min['T1'] + current_max_and_min['T2'] +
-        current_max_and_min['T3'], 4, current_max_and_min['DISPATCHMODE'])
+    # Override the MINENERGY con for unit not in dispatch mode 0
+    current_max_and_min['MINENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 1,
+                                                current_max_and_min['TOTALCLEARED'],
+                                                current_max_and_min['MINENERGY'])
+    current_max_and_min['MINENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 2,
+                                                current_max_and_min['TOTALCLEARED'],
+                                                current_max_and_min['MINENERGY'])
+    current_max_and_min['MINENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 3,
+                                                current_max_and_min['MINIMUMLOAD'], current_max_and_min['MINENERGY'])
+
+    # Override the MAXENERGY con for units in dispatch mode 1 and 2
+    current_max_and_min['MAXENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 1,
+                                                current_max_and_min['TOTALCLEARED'],
+                                                current_max_and_min['MAXENERGY'])
+    current_max_and_min['MAXENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 2,
+                                                current_max_and_min['TOTALCLEARED'],
+                                                current_max_and_min['MAXENERGY'])
 
     # Change starting max limit if unit below minimum load
-    current_max_and_min['MAXENERGY'] = np.where((current_max_and_min['INITIALMW'] < current_max_and_min['MINIMUMLOAD'])
-                                                & (current_max_and_min['DISPATCHMODE'] != 0),
+    current_max_and_min['MAXENERGY'] = np.where((current_max_and_min['TOTALCLEARED'] > current_max_and_min['MAXENERGY'])
+                                                & (current_max_and_min['DISPATCHMODE'].isin([3, 4]))
+                                                & (current_max_and_min['LASTTOTALCLEARED'] >
+                                                current_max_and_min['INITIALMW']),
                                                 current_max_and_min['LASTTOTALCLEARED'] +
                                                 current_max_and_min['RAMPUPRATE'] / 12,
                                                 current_max_and_min['MAXENERGY'])
 
-    # Calculate the time left in the current dispatch mode.
-    current_max_and_min['TREMANINING'] = np.where(current_max_and_min['DISPATCHMODE'] == 0, 0, 0)
-    current_max_and_min['TREMANINING'] = np.where(current_max_and_min['DISPATCHMODE'] == 1,
-                                                  current_max_and_min['T1'] -
-                                                  current_max_and_min['TIMESINCECOMMITMENT'],
-                                                  current_max_and_min['TREMANINING'])
-    current_max_and_min['TREMANINING'] = np.where(current_max_and_min['DISPATCHMODE'] == 2,
-                                                  current_max_and_min['T1'] + current_max_and_min['T2'] -
-                                                  current_max_and_min['TIMESINCECOMMITMENT'],
-                                                  current_max_and_min['TREMANINING'])
-    current_max_and_min['TREMANINING'] = np.where(current_max_and_min['DISPATCHMODE'] == 3,
-                                                  current_max_and_min['T1'] + current_max_and_min['T2'] +
-                                                  current_max_and_min['T3'] -
-                                                  current_max_and_min['TIMESINCECOMMITMENT'],
-                                                  current_max_and_min['TREMANINING'])
-    current_max_and_min['TREMANINING'] = np.where(current_max_and_min['DISPATCHMODE'] == 4,
-                                                  current_max_and_min['T1'] + current_max_and_min['T2'] +
-                                                  current_max_and_min['T3'] + current_max_and_min['T4'] -
-                                                  current_max_and_min['TIMESINCECOMMITMENT'],
-                                                  current_max_and_min['TREMANINING'])
-
-    # Override the MINENERGY con for unit not in dispatch mode 0
-    current_max_and_min['MINENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 1, 0,
-                                                current_max_and_min['MINENERGY'])
-    current_max_and_min['MINENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 2,
-                                                current_max_and_min['MINIMUMLOAD'] * (
-                                                    (current_max_and_min['T2'] - current_max_and_min['TREMANINING']) /
-                                                    current_max_and_min['T2']),
-                                                current_max_and_min['MINENERGY'])
-    # current_max_and_min['MINENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 1,
-    #                                             current_max_and_min['TOTALCLEARED'],
-    #                                             current_max_and_min['MINENERGY'])
-    # current_max_and_min['MINENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 2,
-    #                                             current_max_and_min['TOTALCLEARED'],
-    #                                             current_max_and_min['MINENERGY'])
-    current_max_and_min['MINENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 3,
-                                                current_max_and_min['MINIMUMLOAD'], current_max_and_min['MINENERGY'])
-    current_max_and_min['MINENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 4,
-                                                current_max_and_min['MINIMUMLOAD'] -
-                                                current_max_and_min['MINIMUMLOAD'] * (
-                                                    (current_max_and_min['T4'] - current_max_and_min['TREMANINING']) /
-                                                    current_max_and_min['T4']),
-                                                current_max_and_min['MINENERGY'])
-
-    # If the T4 profile goes negative then set to zero.
-    current_max_and_min['MINENERGY'] = np.where((current_max_and_min['DISPATCHMODE'] == 4) &
-                                                (current_max_and_min['MINENERGY'] < 0), 0,
-                                                current_max_and_min['MINENERGY'])
-
-    # Override the MAXENERGY con for units in dispatch mode 1 and 2
-    current_max_and_min['MAXENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 1, 0,
+    current_max_and_min['MAXENERGY'] = np.where((current_max_and_min['TOTALCLEARED'] > current_max_and_min['MAXENERGY'])
+                                                & (current_max_and_min['DISPATCHMODE'].isin([3, 4])),
+                                                current_max_and_min['TOTALCLEARED'],
                                                 current_max_and_min['MAXENERGY'])
-    current_max_and_min['MAXENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 2,
-                                                current_max_and_min['MINIMUMLOAD'] * (
-                                                    (current_max_and_min['T2'] - current_max_and_min['TREMANINING']) /
-                                                    current_max_and_min['T2']),
-                                                current_max_and_min['MAXENERGY'])
-    # current_max_and_min['MAXENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 1,
-    #                                             current_max_and_min['TOTALCLEARED'],
-    #                                             current_max_and_min['MINENERGY'])
-    # current_max_and_min['MAXENERGY'] = np.where(current_max_and_min['DISPATCHMODE'] == 2,
-    #                                             current_max_and_min['TOTALCLEARED'],
-    #                                             current_max_and_min['MINENERGY'])
+
+    current_max_and_min['MINENERGY'] = np.where((current_max_and_min['MINENERGY'] > current_max_and_min['MINIMUMLOAD'])
+                                                & (current_max_and_min['DISPATCHMODE'].isin([3, 4])),
+                                                current_max_and_min['MINIMUMLOAD'],
+                                                current_max_and_min['MINENERGY'])
 
     # Remove extra columns from max and min data frame.
-    cols_discard = ['TIMESINCECOMMITMENT', 'MINIMUMLOAD', 'T1', 'T2', 'T3', 'T4', 'TREMANINING', 'DISPATCHMODEORG']
+    cols_discard = ['MINIMUMLOAD']
     cols_to_keep = [col for col in current_max_and_min.columns if col not in cols_discard]
     current_max_and_min = current_max_and_min.loc[:, cols_to_keep]
     return current_max_and_min

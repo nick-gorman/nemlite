@@ -71,8 +71,8 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
                                      ns.col_dispatch_type, 'CONNECTIONPOINTID')]
 
     # Create a list of the plants operating in fast start mode.
-    # fast_start_du = define_fast_start_plants(price_bids_raw.copy())
-    capacity_bids_scaled = pre_process_bids.filter_and_scale(capacity_bids_raw.copy(), unit_solution_raw)
+    capacity_bids_scaled = pre_process_bids.filter_and_scale(capacity_bids_raw.copy(), price_bids_raw.copy(),
+                                                             unit_solution_raw)
     # Create a data frame of the constraints that define generator capacity bids in the energy and FCAS markets. A
     # data frame that defines each variable used to represent the the bids in the linear program is also returned.
     bidding_constraints, bid_variable_data = \
@@ -270,7 +270,8 @@ def create_generic_constraints(connection_point_constraints, inter_constraints, 
     type_and_rhs = hf.save_index(type_and_rhs.reset_index(drop=True), 'ROWINDEX', index_offset + 1)
 
     # Make the row index into the combined constraints dataframe.
-    combined_constraints = pd.merge(combined_constraints, type_and_rhs.loc[:, ['GENCONID', 'ROWINDEX']], 'inner', 'GENCONID')
+    combined_constraints = pd.merge(combined_constraints, type_and_rhs.loc[:, ['GENCONID', 'ROWINDEX']], 'inner',
+                                    'GENCONID')
     # Keep explicit duid constraints over those implied via regional constraints.
     # just_duid_combined_cons = combined_constraints[combined_constraints['INDEX'].isin(bids_and_indexes['INDEX'])]
     # just_duid_combined_cons = just_duid_combined_cons.sort_values('DUID')
@@ -278,7 +279,8 @@ def create_generic_constraints(connection_point_constraints, inter_constraints, 
     # just_non_duid_combined_cons = combined_constraints[~combined_constraints['INDEX'].isin(bids_and_indexes['INDEX'])]
     # combined_constraints = pd.concat([just_duid_combined_cons, just_non_duid_combined_cons], sort=False)
     # Select just data needed for the constraint matrix.
-    combined_constraints = combined_constraints.groupby(['INDEX', 'ROWINDEX'], as_index=False).aggregate({'FACTOR': 'sum'})
+    combined_constraints = combined_constraints.groupby(['INDEX', 'ROWINDEX'], as_index=False).aggregate(
+        {'FACTOR': 'sum'})
     combined_constraints = combined_constraints.loc[:, ('INDEX', 'FACTOR', 'ROWINDEX')]
     # Rename columns to standard constrain matrix names.
     combined_constraints.columns = ['INDEX', 'LHSCOEFFICIENTS', 'ROWINDEX']

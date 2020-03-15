@@ -107,7 +107,7 @@ def pre_filter(table, date_time_sequence, raw_data_location, filtered_data):
 
     sorted_date_times = sorted(date_time_sequence)
     start_time = sorted_date_times[0]
-    start_time_obj = datetime.strptime(start_time, '%Y/%m/%d %H:%M:%S') - timedelta(minutes=5)
+    start_time_obj = datetime.strptime(start_time, '%Y/%m/%d %H:%M:%S') - timedelta(minutes=10)
     start_time = start_time_obj.isoformat().replace('T', ' ').replace('-', '/')
     end_time = sorted_date_times[-1]
     all_data = data_fetch_methods.method_map[table](start_time, end_time, table, raw_data_location,
@@ -249,6 +249,21 @@ def no_filter(**kwargs):
 
 
 def filter_dispatch_load(**kwargs):
+    data, date_time = kwargs['data'], kwargs['date_time']
+    date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
+    previous_date_time = date_time - timedelta(minutes=5)
+    previous_date_time = datetime.strptime(previous_date_time, '%Y/%m/%d %H:%M:%S')
+    data['SETTLEMENTDATE'] = pd.to_datetime(data['SETTLEMENTDATE'], format='%Y/%m/%d %H:%M:%S')
+    data = data[(data['SETTLEMENTDATE'] == date_time)]
+    previous_data = data[(data['SETTLEMENTDATE'] == previous_date_time)]
+    previous_data = previous_data.loc[:, ['DUID', 'TOTALCLEARED']]
+    previous_data.columns = ['DUID', 'LASTTOTALCLEARED']
+    data = pd.merge(data, previous_data, 'left', 'DUID')
+    data.fillna(0)
+    return data
+
+
+def _filter_dispatch_load(**kwargs):
     """
     Calculates the time since a fast start unit received instructions to commit. Filters to single dispatch interval.
 
@@ -361,7 +376,7 @@ filter_map = {'SPDCONNECTIONPOINTCONSTRAINT': constraint_filter,
               'BIDDAYOFFER_D': settlement_just_date_filter,
               'MNSP_DAYOFFER': settlement_just_date_and_version_filter,
               'MNSP_PEROFFER': half_hour_periods,
-              'DISPATCHLOAD': settlement_date_filter,
+              'DISPATCHLOAD': filter_dispatch_load,
               'LOSSMODEL': effective_date_and_version_filter_for_inter_seg,
               'LOSSFACTORMODEL': effective_date_and_version_filter,
               'DISPATCHREGIONSUM': settlement_date_filter,
