@@ -4,7 +4,7 @@ from mip import Model, xsum, minimize, INTEGER, OptimizationStatus, LinExpr
 
 
 def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficients,
-             rhs_and_inequality_types, region_req_by_row, regions_to_price):
+             rhs_and_inequality_types, cons_to_price, regions_to_price):
 
     # Create the mip object.
     prob = Model("energymarket")
@@ -75,27 +75,34 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
     dispatches['BASERUN'] = strip_gen_outputs_to_minimal(bid_bounds)
     inter_flows['BASERUN'] = strip_inter_outputs_to_minimal(inter_bounds)
     # Perform pricing runs for each region.
-    for region in regions_to_price:
-        prob_marginal = prob
-        row_index = get_region_load_constraint_index(region_req_by_row, region)
-        old_constraint_index = get_con_by_name(prob_marginal.constrs, str(row_index))
-        old_constraint = prob_marginal.constrs[old_constraint_index]
-        prob_marginal.remove(old_constraint)
-        new_constraint = make_constraint(var_list, constraint_matrix.loc[row_index, :].values, rhs[row_index],
-                                         enq_type[row_index], marginal_offset=1)
-        prob_marginal.add_constr(new_constraint, name='blah')
-        prob_marginal.optimize()
-        bid_bounds = outputs(bid_bounds)
-        inter_bounds = outputs(inter_bounds)
-        dispatches[region] = strip_gen_outputs_to_minimal(bid_bounds)
-        inter_flows[region] = strip_inter_outputs_to_minimal(inter_bounds)
-        new_constraint_index = get_con_by_name(prob_marginal.constrs, 'blah')
-        new_constraint = prob_marginal.constrs[new_constraint_index]
-        prob_marginal.remove(new_constraint)
-        old_constraint = make_constraint(var_list, constraint_matrix.loc[row_index, :].values, rhs[row_index],
-                                         enq_type[row_index], marginal_offset=0)
-        prob_marginal.add_constr(old_constraint, name=str(row_index))
-    return dispatches, inter_flows
+    # for region in regions_to_price:
+    #     prob_marginal = prob
+    #     row_index = get_region_load_constraint_index(region_req_by_row, region)
+    #     old_constraint_index = get_con_by_name(prob_marginal.constrs, str(row_index))
+    #     old_constraint = prob_marginal.constrs[old_constraint_index]
+    #     prob_marginal.remove(old_constraint)
+    #     new_constraint = make_constraint(var_list, constraint_matrix.loc[row_index, :].values, rhs[row_index],
+    #                                      enq_type[row_index], marginal_offset=1)
+    #     prob_marginal.add_constr(new_constraint, name='blah')
+    #     prob_marginal.optimize()
+    #     bid_bounds = outputs(bid_bounds)
+    #     inter_bounds = outputs(inter_bounds)
+    #     dispatches[region] = strip_gen_outputs_to_minimal(bid_bounds)
+    #     inter_flows[region] = strip_inter_outputs_to_minimal(inter_bounds)
+    #     new_constraint_index = get_con_by_name(prob_marginal.constrs, 'blah')
+    #     new_constraint = prob_marginal.constrs[new_constraint_index]
+    #     prob_marginal.remove(new_constraint)
+    #     old_constraint = make_constraint(var_list, constraint_matrix.loc[row_index, :].values, rhs[row_index],
+    #                                      enq_type[row_index], marginal_offset=0)
+    #     prob_marginal.add_constr(old_constraint, name=str(row_index))
+    cons_to_price['Price'] = cons_to_price.apply(lambda x: get_price(x['ROWINDEX'], base_prob), axis=1)
+    return dispatches, inter_flows, cons_to_price
+
+
+def get_price(row_index, prob):
+    row_index = get_con_by_name(prob.constrs, str(row_index))
+    constraint = prob.constrs[row_index]
+    return constraint.pi
 
 
 def get_con_by_name(constraints, name):

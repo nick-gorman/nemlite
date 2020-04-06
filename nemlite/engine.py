@@ -39,21 +39,23 @@ def run(dispatch_unit_information, dispatch_unit_capacity_bids, initial_conditio
     # Solve a number of variations of the base problem. These are the problem with the actual loads for each region
     # and an extra solve for each region where a marginal load of 1 MW is added. The dispatches of each
     # dispatch unit are returned for each solve, as well as the interconnector flows.
-    dispatches, inter_flows = \
+    dispatches, inter_flows, results_price = \
         solver_interface.solve_lp(var_definitions, inter_variable_bounds, combined_constraints,
                                   objective_coefficients, rhs_and_inequality_types, region_req_by_row,
                                   regions_to_price)
 
     # The price of energy in each region is calculated. This is done by comparing the results of the base dispatch
     # with the results of dispatches with the marginal load added.
-    results_price, results_service, results_state = \
-        price_regions(dispatches['BASERUN'], dispatches, duid_and_link_data, results_price, results_service,
-                      results_state, regions_to_price, market_cap_and_floor)
+    # results_price, results_service, results_state = \
+    #     price_regions(dispatches['BASERUN'], dispatches, duid_and_link_data, results_price, results_service,
+    #                   results_state, regions_to_price, market_cap_and_floor)
     # Turn the results lists into a pandas dataframe, note currently only the energy service is priced.
-    results_dataframe = pd.DataFrame({'State': results_state, 'Service': results_service,
-                                      'Price': results_price})
+    #results_dataframe = pd.DataFrame({'State': results_state, 'Service': results_service,
+    #                                  'Price': results_price})
 
-    return results_dataframe, dispatches, inter_flows
+    results_price = results_price.groupby(['REGIONID', 'BIDTYPE']).aggregate({'Price': 'max'})
+    results_price.columns = ['State', 'Service', 'Price']
+    return results_price, dispatches, inter_flows
 
 
 def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, inter_direct_raw,
@@ -138,7 +140,7 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
 
     # Create generic constraints, these are the generally the network constraints calculated by AEMO.
     max_con_index = hf.max_constraint_index(constraints_coupling_links_to_interconnector)
-    generic_constraints, type_and_rhs = create_generic_constraints(con_point_constraints, inter_gen_constraints,
+    generic_constraints, type_and_rhs, cons_to_price = create_generic_constraints(con_point_constraints, inter_gen_constraints,
                                                                    gen_con_data, bid_variable_data,
                                                                    inter_bounds, duid_info, max_con_index,
                                                                    region_constraints)
@@ -181,8 +183,10 @@ def create_lp_as_dataframes(gen_info_raw, capacity_bids_raw, unit_solution_raw, 
     link_loss_factors['DISPATCHTYPE'] = 'GENERATOR'
     duid_and_link_data = pd.concat([duid_info, link_loss_factors], sort=False)
 
+    cons_to_price = pd.concat([cons_to_price, region_req_by_row.loc[:, ['REGIONID', 'BIDTYPE', 'ROWINDEX']]])
+
     return combined_constraints, rhs_and_inequality_types, objective_coefficients, bid_variable_data, \
-           req_row_indexes_coefficients_for_inter, region_req_by_row, duid_and_link_data
+           req_row_indexes_coefficients_for_inter, cons_to_price, duid_and_link_data
 
 
 def create_duid_version_of_link_data(link_data):
@@ -257,6 +261,8 @@ def create_generic_constraints(connection_point_constraints, inter_constraints, 
     # Map in additional data needed about constraint.
     active_region_cons = pd.merge(active_region_cons, constraint_rhs, 'inner', ['GENCONID'])
     # Refine data to just that need for the final generic constrain preparation.
+    cons_to_price = active_region_cons.drop_duplicates(['GENCONID', 'BIDTYPE', 'REGIONID']).\
+        loc[:, ['GENCONID', 'BIDTYPE', 'REGIONID']]
     cols_to_keep = ('INDEX', 'FACTOR', 'CONSTRAINTTYPE', 'RHS', 'GENCONID', 'GENERICCONSTRAINTWEIGHT')
     region_cons = active_region_cons.loc[:, cols_to_keep]
 
@@ -268,6 +274,8 @@ def create_generic_constraints(connection_point_constraints, inter_constraints, 
     # Make just unique constraints, giving each constraint a specific row index in the constraint matrix.
     type_and_rhs = type_and_rhs.drop_duplicates(subset='GENCONID', keep='first')
     type_and_rhs = hf.save_index(type_and_rhs.reset_index(drop=True), 'ROWINDEX', index_offset + 1)
+
+    cons_to_price = pd.merge(cons_to_price, type_and_rhs.loc[:, ['GENCONID', 'ROWINDEX']], 'inner', on=['GENCONID'])
 
     # Make the row index into the combined constraints dataframe.
     combined_constraints = pd.merge(combined_constraints, type_and_rhs.loc[:, ['GENCONID', 'ROWINDEX']], 'inner', 'GENCONID')
@@ -286,7 +294,7 @@ def create_generic_constraints(connection_point_constraints, inter_constraints, 
     # Rename to standard names.
     type_and_rhs.columns = ['CONSTRAINTTYPE', 'RHSCONSTANT', 'GENCONID', 'CONSTRAINTWEIGHT', 'ROWINDEX']
 
-    return combined_constraints, type_and_rhs
+    return combined_constraints, type_and_rhs, cons_to_price
 
 
 def create_region_req_contribution_to_constraint_matrix(latest_region_req, start_index, ):
