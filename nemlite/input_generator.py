@@ -56,23 +56,23 @@ def run_datetime(date_time, filtered_data_folder):
     timestamp, inter_demand_coefficients, mnsp_inter, mnsp_price_bids, mnsp_capacity_bids, \
     market_cap_and_floor = load_from_datetime(date_time, filtered_data_folder)
 
-    # try:
-    nemlite_results, dispatches, inter_flows = engine.run(gen_info_raw, capacity_bids_raw,
-                                                          initial_conditions,
-                                                          inter_direct_raw, region_req_raw, price_bids_raw,
-                                                          inter_seg_definitions, con_point_constraints,
-                                                          inter_gen_constraints, gen_con_data,
-                                                          region_constraints, inter_demand_coefficients,
-                                                          mnsp_inter, mnsp_price_bids, mnsp_capacity_bids,
-                                                          market_cap_and_floor)
-    nemlite_results['DateTime'] = timestamp
-    dispatches['BASERUN']['DateTime'] = timestamp
-    inter_flows['BASERUN']['DateTime'] = timestamp
-    # except:
-    #     print('Dispatch failed for {}'.format(timestamp))
-    #     nemlite_results = pd.DataFrame()
-    #     dispatches = {'BASERUN': pd.DataFrame()}
-    #     inter_flows = {'BASERUN': pd.DataFrame()}
+    try:
+        nemlite_results, dispatches, inter_flows = engine.run(gen_info_raw, capacity_bids_raw,
+                                                              initial_conditions,
+                                                              inter_direct_raw, region_req_raw, price_bids_raw,
+                                                              inter_seg_definitions, con_point_constraints,
+                                                              inter_gen_constraints, gen_con_data,
+                                                              region_constraints, inter_demand_coefficients,
+                                                              mnsp_inter, mnsp_price_bids, mnsp_capacity_bids,
+                                                              market_cap_and_floor)
+        nemlite_results['DateTime'] = timestamp
+        dispatches['BASERUN']['DateTime'] = timestamp
+        inter_flows['BASERUN']['DateTime'] = timestamp
+    except:
+        print('Dispatch failed for {}'.format(timestamp))
+        nemlite_results = pd.DataFrame()
+        dispatches = {'BASERUN': pd.DataFrame()}
+        inter_flows = {'BASERUN': pd.DataFrame()}
 
     return nemlite_results, dispatches, inter_flows
 

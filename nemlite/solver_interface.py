@@ -65,8 +65,8 @@ def solve_lp(bid_bounds, inter_bounds, combined_constraints, objective_coefficie
     # Check of a solution has been found.
     if status != OptimizationStatus.OPTIMAL:
         # Attempt find constraint causing infeasibility.
-        con_index = find_problem_constraint(base_prob)
-        print('Couldn\'t find an optimal solution, but removing con {} fixed INFEASIBLITY'.format(con_index))
+        #con_index = find_problem_constraint(base_prob)
+        #print('Couldn\'t find an optimal solution, but removing con {} fixed INFEASIBLITY'.format(con_index))
         raise ValueError('Linear program infeasible')
 
     # Save base case results
