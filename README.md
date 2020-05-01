@@ -1,7 +1,9 @@
-# Nemlite
+## Development on this project has shifted to a new repo, [nempy!](https://github.com/UNSW-CEEM/nempy)
+
+## Nemlite
 See wiki for more information.
 
-# Example usage
+## Example usage
 Using the inbuilt historical input replicator 
 
 import nemlite
