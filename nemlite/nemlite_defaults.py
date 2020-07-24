@@ -28,7 +28,7 @@ parent_tables = ['DUDETAILSUMMARY', 'INTERCONNECTORCONSTRAINT', 'INTERCONNECTOR'
 child_parent_map = {'connection_point_constraints': ['SPDCONNECTIONPOINTCONSTRAINT'],
                     'constraint_data': ['GENCONDATA', 'DISPATCHCONSTRAINT'],
                     'interconnector_constraints': ['SPDINTERCONNECTORCONSTRAINT'],
-                    'capacity_bids': ['BIDPEROFFER_D'], # Dispatch load should get merged here.
+                    'capacity_bids': ['BIDPEROFFER_D'],  # Dispatch load should get merged here.
                     'interconnectors': ['INTERCONNECTOR', 'INTERCONNECTORCONSTRAINT'],
                     'market_interconnectors': ['MNSP_INTERCONNECTOR'],
                     'generator_information': ['DUDETAILSUMMARY'],

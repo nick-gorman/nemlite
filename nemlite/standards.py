@@ -16,7 +16,7 @@ class Naming:
                  col_raise_req_req: str, col_region_id: str, col_region_constraint_type: str,
                  col_region_constraint_value: str, col_end_date: str, col_contribution_coefficients: str,
                  col_region_from: str, col_region_to: str, col_direction: str, col_limit_value,
-                 col_enquality_type: str, col_price: str, col_loss_factor: str, col_dispatch_type: str, type_load:str,
+                 col_enquality_type: str, col_price: str, col_loss_factor: str, col_dispatch_type: str, type_load: str,
                  type_gen: str, col_pool_id: str):
 
         self.base_filename = base_filename

@@ -1,4 +1,3 @@
-import os
 import pandas as pd
 from nemosis import data_fetch_methods
 from nemosis import defaults
@@ -65,8 +64,8 @@ def load_and_merge(date_time_name, filtered_data):
             print('Parent table left unmerged')
 
     child_tables['interconnector_segments'] = \
-        child_tables['interconnector_segments'][~child_tables['interconnector_segments']['INTERCONNECTORID']
-        .isin(child_tables['interconnectors'][child_tables['interconnectors']['ICTYPE'] == 'MNSP']['INTERCONNECTORID'])]
+        child_tables['interconnector_segments'][~child_tables['interconnector_segments']['INTERCONNECTORID'].isin(child_tables['interconnectors'][child_tables['interconnectors']['ICTYPE']
+                                                                                                                                                  == 'MNSP']['INTERCONNECTORID'])]
 
     return child_tables
 
@@ -163,7 +162,6 @@ def effective_date_filter(data, save_location_formated, date_time, datetime_name
     date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
     data['EFFECTIVEDATE'] = pd.to_datetime(data['EFFECTIVEDATE'], format='%Y/%m/%d %H:%M:%S')
     data = data[data['EFFECTIVEDATE'] <= date_time]
-    group_cols = defaults.effective_date_group_col[table_name]
     data = query_wrapers.most_recent_records_before_start_time(data, date_time, table_name)
     return data
 
@@ -179,7 +177,6 @@ def effective_date_and_version_filter(data, save_location_formated, date_time, d
 
 
 def effective_date_and_version_filter_for_inter_seg(data, save_location_formated, date_time, datetime_name, table_name):
-    data_orginal = data.copy()
     date_time = datetime.strptime(date_time, '%Y/%m/%d %H:%M:%S')
     data['EFFECTIVEDATE'] = pd.to_datetime(data['EFFECTIVEDATE'], format='%Y/%m/%d %H:%M:%S')
     data = data[data['EFFECTIVEDATE'] <= date_time]
@@ -187,8 +184,8 @@ def effective_date_and_version_filter_for_inter_seg(data, save_location_formated
     data = query_wrapers.most_recent_records_before_start_time(data, date_time, table_name)
     data = most_recent_version(data, table_name, group_cols)
     data = data.drop_duplicates(['EFFECTIVEDATE', 'INTERCONNECTORID', 'VERSIONNO', 'LOSSSEGMENT'])
-    #data = data.loc[:, ('EFFECTIVEDATE', 'INTERCONNECTORID', 'VERSIONNO')]
-    #data = pd.merge(data, data_orginal, 'left', ['EFFECTIVEDATE', 'INTERCONNECTORID', 'VERSIONNO'])
+    # data = data.loc[:, ('EFFECTIVEDATE', 'INTERCONNECTORID', 'VERSIONNO')]
+    # data = pd.merge(data, data_orginal, 'left', ['EFFECTIVEDATE', 'INTERCONNECTORID', 'VERSIONNO'])
     return data
 
 
@@ -199,7 +196,7 @@ def start_date_end_date_filter(data, save_location_formated, date_time, datetime
     data = data[(data['START_DATE'] <= date_time) & (data['END_DATE'] > date_time)]
     data = data.sort_values('END_DATE').groupby(['DUID', 'START_DATE'], as_index=False).first()
     data = data.sort_values('START_DATE').groupby(['DUID'], as_index=False).first()
-    #data = query_wrapers.most_recent_records_before_start_time(data, date_time, table_name)
+    # data = query_wrapers.most_recent_records_before_start_time(data, date_time, table_name)
     return data
 
 
@@ -235,6 +232,7 @@ def derive_group_cols(table_name, date_col, also_exclude=None):
     group_cols = [column for column in defaults.table_primary_keys[table_name] if column not in exclude_from_group_cols]
     return group_cols
 
+
 filter_map = {'SPDCONNECTIONPOINTCONSTRAINT': constraint_filter,
               'GENCONDATA': constraint_filter,
               'SPDINTERCONNECTORCONSTRAINT': constraint_filter,
@@ -255,7 +253,3 @@ filter_map = {'SPDCONNECTIONPOINTCONSTRAINT': constraint_filter,
               'LOSSFACTORMODEL': effective_date_and_version_filter,
               'DISPATCHREGIONSUM': settlement_date_filter,
               'MARKET_PRICE_THRESHOLDS': effective_date_and_version_filter}
-
-
-
-
