@@ -1,4 +1,4 @@
-## Development on this project has shifted to a new repo, [nempy!](https://github.com/UNSW-CEEM/nempy)
+# Deprecated: development on this project has shifted to a new repo, [nempy!](https://github.com/UNSW-CEEM/nempy)
 
 ## Nemlite
 See wiki for more information.
